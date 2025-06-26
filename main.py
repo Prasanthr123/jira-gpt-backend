@@ -11,6 +11,7 @@ async def create_jira_story(req: Request):
 
     summary = data.get("summary")
     description = data.get("description")
+    issue_type = data.get("issue_type", "Story")  # Default to "Story" if not provided
 
     if not summary or not description:
         return JSONResponse(status_code=400, content={"error": "Missing fields"})
@@ -43,7 +44,7 @@ async def create_jira_story(req: Request):
                     }]
                 }]
             },
-            
+            "issuetype": {"name": issue_type}  # Inject issue type here
         }
     }
 
