@@ -22,7 +22,7 @@ async def jira_handler(req: Request):
                 "project": {"key": project_key},
                 "summary": data["summary"],
                 "description": data["description"],
-                "issuetype": {"name": "Bug"}
+               "issuetype": {"name": data.get("issue_type", "Bug")},
             }
         }
         r = requests.post(f"{jira_url}/rest/api/3/issue", auth=auth, headers=headers, json=payload)
