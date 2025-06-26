@@ -1,19 +1,20 @@
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 import os
 import requests
-from flask import Flask, request, jsonify
 
-app = Flask(__name__)
+app = FastAPI()
 
-@app.route("/create_jira_story", methods=["POST"])
-def create_jira_story():
-    data = request.get_json()
+@app.post("/")
+async def create_jira_story(req: Request):
+    data = await req.json()
+
     summary = data.get("summary")
     description = data.get("description")
 
     if not summary or not description:
-        return jsonify({"error": "Missing summary or description"}), 400
+        return JSONResponse(status_code=400, content={"error": "Missing fields"})
 
-    # ✅ Securely fetch credentials from env
     jira_email = os.getenv("JIRA_EMAIL")
     jira_token = os.getenv("JIRA_TOKEN")
     jira_url = os.getenv("JIRA_URL")
@@ -49,12 +50,6 @@ def create_jira_story():
     response = requests.post(url, headers=headers, auth=auth, json=payload)
 
     if response.status_code == 201:
-        return jsonify({
-            "message": "Story created successfully",
-            "issueKey": response.json().get("key")
-        }), 201
+        return {"message": "Story created", "issueKey": response.json().get("key")}
     else:
-        return jsonify({
-            "error": response.text,
-            "status": response.status_code
-        }), response.status_code
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
