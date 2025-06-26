@@ -44,7 +44,9 @@ async def create_jira_story(req: Request):
                     }]
                 }]
             },
-            "issuetype": {"name": issue_type}  # Inject issue type here
+            issue_type = data.get("issue_type", "Story")
+"issuetype": {"name": issue_type}
+
         }
     }
 
