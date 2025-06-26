@@ -43,7 +43,7 @@ async def create_jira_story(req: Request):
                     }]
                 }]
             },
-            "issuetype": {"name": "Story"}
+            
         }
     }
 
