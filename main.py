@@ -44,7 +44,9 @@ async def create_jira_story(req: Request):
                     }]
                 }]
             },
-            "issuetype": {"name": issue_type}
+            "issuetype": {"name": issue_type}valid_types = ["Bug", "Task", "Story", "Improvement"]
+if data.get("issue_type") not in valid_types:
+    return {"error": "Invalid issue type. Must be one of: " + ", ".join(valid_types)}, 400
         }
     }
 
