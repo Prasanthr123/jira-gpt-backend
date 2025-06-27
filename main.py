@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+import os
 import requests
 
 app = FastAPI()
@@ -11,10 +12,12 @@ async def create_jira_story(req: Request):
     summary = data.get("summary")
     description = data.get("description")
     issue_type = data.get("issue_type", "Bug")
-    project_key = data.get("project_key")
-    jira_email = data.get("email")
-    jira_token = data.get("token")
-    jira_url = data.get("url")
+
+    # Environment variables (set in Render)
+    jira_email = os.getenv("JIRA_EMAIL")
+    jira_token = os.getenv("JIRA_TOKEN")
+    jira_url = os.getenv("JIRA_URL")
+    project_key = os.getenv("JIRA_PROJECT")
 
     # Validate required fields
     if not all([summary, description, project_key, jira_email, jira_token, jira_url]):
