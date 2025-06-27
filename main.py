@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-import os
 import requests
 
 app = FastAPI()
@@ -11,15 +10,22 @@ async def create_jira_story(req: Request):
 
     summary = data.get("summary")
     description = data.get("description")
-    issue_type = data.get("issue_type", "Story")  # Valid: Bug, Story, Task, Improvement
+    issue_type = data.get("issue_type", "Bug")
+    project_key = data.get("project_key")
+    jira_email = data.get("email")
+    jira_token = data.get("token")
+    jira_url = data.get("url")
 
-    if not summary or not description:
-        return JSONResponse(status_code=400, content={"error": "Missing fields"})
+    # Validate required fields
+    if not all([summary, description, project_key, jira_email, jira_token, jira_url]):
+        return JSONResponse(status_code=400, content={"error": "Missing required fields"})
 
-    jira_email = os.getenv("JIRA_EMAIL")
-    jira_token = os.getenv("JIRA_TOKEN")
-    jira_url = os.getenv("JIRA_URL")
-    project_key = os.getenv("JIRA_PROJECT")
+    # Validate issue type
+    valid_types = ["Bug", "Task", "Story", "Improvement"]
+    if issue_type not in valid_types:
+        return JSONResponse(status_code=400, content={
+            "error": f"Invalid issue type. Must be one of: {', '.join(valid_types)}"
+        })
 
     url = f"{jira_url}/rest/api/3/issue"
     auth = (jira_email, jira_token)
@@ -44,15 +50,18 @@ async def create_jira_story(req: Request):
                     }]
                 }]
             },
-            "issuetype": {"name": issue_type}valid_types = ["Bug", "Task", "Story", "Improvement"]
-if data.get("issue_type") not in valid_types:
-    return {"error": "Invalid issue type. Must be one of: " + ", ".join(valid_types)}, 400
+            "issuetype": {"name": issue_type}
         }
     }
 
     response = requests.post(url, headers=headers, auth=auth, json=payload)
 
     if response.status_code == 201:
-        return {"message": "Story created", "issueKey": response.json().get("key")}
+        return {
+            "message": "Jira issue created successfully.",
+            "issueKey": response.json().get("key")
+        }
     else:
-        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+        return JSONResponse(status_code=response.status_code, content={
+            "error": response.text
+        })
