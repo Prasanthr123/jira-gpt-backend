@@ -23,7 +23,6 @@ async def create_jira_story(req: Request):
     if not all([summary, description, project_key, jira_email, jira_token, jira_url]):
         return JSONResponse(status_code=400, content={"error": "Missing required fields"})
 
-    # Validate issue type
     valid_types = ["Bug", "Task", "Story", "Improvement"]
     if issue_type not in valid_types:
         return JSONResponse(status_code=400, content={
