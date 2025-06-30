@@ -5,6 +5,13 @@ import requests
 
 app = FastAPI()
 
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+import os
+import requests
+
+app = FastAPI()
+
 @app.post("/")
 async def create_jira_story(req: Request):
     data = await req.json()
