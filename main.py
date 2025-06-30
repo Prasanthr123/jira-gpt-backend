@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import os
@@ -5,41 +6,40 @@ import requests
 
 app = FastAPI()
 
+# Common config
+def get_jira_config():
+    return {
+        "email": os.getenv("JIRA_EMAIL"),
+        "token": os.getenv("JIRA_TOKEN"),
+        "url": os.getenv("JIRA_URL"),
+        "project_key": os.getenv("JIRA_PROJECT")
+    }
+
+# Create Jira Ticket
 @app.post("/")
 async def create_jira_story(req: Request):
     data = await req.json()
-
     summary = data.get("summary")
     description = data.get("description")
-    issue_type = data.get("issue_type", "Bug").capitalize()
+    issue_type = data.get("issue_type", "Bug")
 
-    # Environment variables (set in Render)
-    jira_email = os.getenv("JIRA_EMAIL")
-    jira_token = os.getenv("JIRA_TOKEN")
-    jira_url = os.getenv("JIRA_URL")
-    project_key = os.getenv("JIRA_PROJECT")
-
-    # Validate required fields
-    if not all([summary, description, project_key, jira_email, jira_token, jira_url]):
+    config = get_jira_config()
+    if not all([summary, description, config["email"], config["token"], config["url"], config["project_key"]]):
         return JSONResponse(status_code=400, content={"error": "Missing required fields"})
 
     valid_types = ["Bug", "Task", "Story", "Improvement"]
     if issue_type not in valid_types:
-        return JSONResponse(status_code=400, content={
-            "error": f"Invalid issue type. Must be one of: {', '.join(valid_types)}"
-        })
+        return JSONResponse(status_code=400, content={"error": f"Invalid issue type. Must be one of: {', '.join(valid_types)}"})
 
-    url = f"{jira_url}/rest/api/3/issue"
-    auth = (jira_email, jira_token)
-
+    url = f"{config['url']}/rest/api/3/issue"
+    auth = (config["email"], config["token"])
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json"
     }
-
     payload = {
         "fields": {
-            "project": {"key": project_key},
+            "project": {"key": config["project_key"]},
             "summary": summary,
             "description": {
                 "type": "doc",
@@ -55,15 +55,74 @@ async def create_jira_story(req: Request):
             "issuetype": {"name": issue_type}
         }
     }
-
     response = requests.post(url, headers=headers, auth=auth, json=payload)
-
     if response.status_code == 201:
+        return {"message": "Jira issue created successfully.", "issueKey": response.json().get("key")}
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+# Fetch Jira Ticket
+@app.get("/ticket/{issue_key}")
+async def fetch_jira_ticket(issue_key: str):
+    config = get_jira_config()
+    url = f"{config['url']}/rest/api/3/issue/{issue_key}"
+    auth = (config["email"], config["token"])
+    headers = {"Accept": "application/json"}
+
+    response = requests.get(url, headers=headers, auth=auth)
+    if response.status_code == 200:
+        data = response.json()
         return {
-            "message": "Jira issue created successfully.",
-            "issueKey": response.json().get("key")
+            "summary": data["fields"]["summary"],
+            "description": data["fields"]["description"],
+            "status": data["fields"]["status"]["name"]
         }
     else:
-        return JSONResponse(status_code=response.status_code, content={
-            "error": response.text
-        })
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+# Update Jira Ticket
+@app.patch("/ticket/{issue_key}")
+async def update_jira_ticket(issue_key: str, req: Request):
+    data = await req.json()
+    config = get_jira_config()
+    update_fields = {}
+    if "summary" in data:
+        update_fields["summary"] = data["summary"]
+    if "description" in data:
+        update_fields["description"] = {
+            "type": "doc",
+            "version": 1,
+            "content": [{
+                "type": "paragraph",
+                "content": [{
+                    "type": "text",
+                    "text": data["description"]
+                }]
+            }]
+        }
+
+    url = f"{config['url']}/rest/api/3/issue/{issue_key}"
+    auth = (config["email"], config["token"])
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+    response = requests.put(url, headers=headers, auth=auth, json={"fields": update_fields})
+    if response.status_code == 204:
+        return {"message": f"Ticket {issue_key} updated successfully"}
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+# Delete Jira Ticket
+@app.delete("/ticket/{issue_key}")
+async def delete_jira_ticket(issue_key: str):
+    config = get_jira_config()
+    url = f"{config['url']}/rest/api/3/issue/{issue_key}"
+    auth = (config["email"], config["token"])
+    headers = {"Accept": "application/json"}
+
+    response = requests.delete(url, headers=headers, auth=auth)
+    if response.status_code == 204:
+        return {"message": f"Ticket {issue_key} deleted successfully"}
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
