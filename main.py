@@ -11,7 +11,7 @@ async def create_jira_story(req: Request):
 
     summary = data.get("summary")
     description = data.get("description")
-    issue_type = data.get("issue_type", "Bug")
+    issue_type = data.get("issue_type", "Bug").capitalize()
 
     # Environment variables (set in Render)
     jira_email = os.getenv("JIRA_EMAIL")
