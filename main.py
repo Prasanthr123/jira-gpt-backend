@@ -12,6 +12,17 @@ async def create_jira_story(req: Request):
     summary = data.get("summary")
     description = data.get("description")
     issue_type = data.get("issue_type", "Bug")
+# Handle Jira-friendly issue type mappings
+jira_friendly_types = {
+    "Story": "User Story",
+    "Bug": "Bug",
+    "Task": "Task",
+    "Improvement": "Improvement"
+}
+
+# Convert GPT-sent issue type to Jira-compatible name
+issue_type = jira_friendly_types.get(issue_type, "Bug")
+
 
     # Environment variables (set in Render)
     jira_email = os.getenv("JIRA_EMAIL")
