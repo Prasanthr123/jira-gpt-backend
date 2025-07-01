@@ -268,3 +268,75 @@ async def add_ticket_comment(issue_key: str, req: Request):
     else:
         return JSONResponse(status_code=response.status_code, content={"error": response.text})
 
+# 🔍 update a comment in the ticket
+@app.patch("/ticket/{issue_key}/comments/{comment_id}")
+async def update_ticket_comment(issue_key: str, comment_id: str, req: Request):
+    config = get_jira_config()
+    user_email = config["email"]  # Logged-in user's email
+    url = f"{config['url']}/rest/api/3/issue/{issue_key}/comment/{comment_id}"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+    auth = (user_email, config["token"])
+    data = await req.json()
+    new_text = data.get("body")
+    is_admin = data.get("is_admin", False)  # Pass admin flag from frontend
+
+    # Step 1: Check ownership
+    current = requests.get(url, headers=headers, auth=auth)
+    if current.status_code != 200:
+        return JSONResponse(status_code=current.status_code, content={"error": current.text})
+
+    author_email = current.json().get("author", {}).get("emailAddress", "")
+    if user_email != author_email and not is_admin:
+        return JSONResponse(status_code=403, content={"error": "Permission denied"})
+
+    # Step 2: Patch new comment
+    payload = {
+        "body": {
+            "type": "doc",
+            "version": 1,
+            "content": [{
+                "type": "paragraph",
+                "content": [{
+                    "type": "text",
+                    "text": new_text
+                }]
+            }]
+        }
+    }
+
+    response = requests.put(url, headers=headers, auth=auth, json=payload)
+    if response.status_code == 200:
+        return {"message": "Comment updated successfully"}
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+        
+# 🔍 update a comment in the ticket
+@app.delete("/ticket/{issue_key}/comments/{comment_id}")
+async def delete_ticket_comment(issue_key: str, comment_id: str, req: Request):
+    config = get_jira_config()
+    user_email = config["email"]
+    url = f"{config['url']}/rest/api/3/issue/{issue_key}/comment/{comment_id}"
+    headers = {"Accept": "application/json"}
+    auth = (user_email, config["token"])
+    data = await req.json()
+    is_admin = data.get("is_admin", False)
+
+    # Step 1: Check ownership
+    current = requests.get(url, headers=headers, auth=auth)
+    if current.status_code != 200:
+        return JSONResponse(status_code=current.status_code, content={"error": current.text})
+
+    author_email = current.json().get("author", {}).get("emailAddress", "")
+    if user_email != author_email and not is_admin:
+        return JSONResponse(status_code=403, content={"error": "Permission denied"})
+
+    # Step 2: Delete comment
+    response = requests.delete(url, headers=headers, auth=auth)
+    if response.status_code == 204:
+        return {"message": "Comment deleted successfully"}
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
