@@ -140,3 +140,72 @@ async def get_jira_projects():
         return [{"key": p["key"], "name": p["name"]} for p in projects]
     else:
         return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+# 🔍 Fetch tickets by Sprint ID
+@app.get("/tickets/sprint/{sprint_id}")
+async def get_tickets_by_sprint(sprint_id: int):
+    config = get_jira_config()
+    jql = f"project = {config['project_key']} AND sprint = {sprint_id}"
+    url = f"{config['url']}/rest/api/3/search"
+    headers = {"Accept": "application/json"}
+    auth = (config["email"], config["token"])
+    params = {"jql": jql, "maxResults": 100}
+
+    response = requests.get(url, headers=headers, params=params, auth=auth)
+    if response.status_code == 200:
+        issues = response.json().get("issues", [])
+        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+        
+# 🔍 Fetch tickets by Priority
+@app.get("/tickets/priority/{priority}")
+async def get_tickets_by_priority(priority: str):
+    config = get_jira_config()
+    jql = f'project = {config["project_key"]} AND priority = "{priority}"'
+    url = f"{config['url']}/rest/api/3/search"
+    headers = {"Accept": "application/json"}
+    auth = (config["email"], config["token"])
+    params = {"jql": jql, "maxResults": 100}
+
+    response = requests.get(url, headers=headers, params=params, auth=auth)
+    if response.status_code == 200:
+        issues = response.json().get("issues", [])
+        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+# 🔍 Fetch tickets by label
+@app.get("/tickets/label/{label}")
+async def get_tickets_by_label(label: str):
+    config = get_jira_config()
+    jql = f'project = {config["project_key"]} AND labels = "{label}"'
+    url = f"{config['url']}/rest/api/3/search"
+    headers = {"Accept": "application/json"}
+    auth = (config["email"], config["token"])
+    params = {"jql": jql, "maxResults": 100}
+
+    response = requests.get(url, headers=headers, params=params, auth=auth)
+    if response.status_code == 200:
+        issues = response.json().get("issues", [])
+        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+# 🔍 Fetch tickets by labe
+@app.get("/tickets/reporter/{reporter_email}")
+async def get_tickets_by_reporter(reporter_email: str):
+    config = get_jira_config()
+    jql = f'project = {config["project_key"]} AND reporter = "{reporter_email}"'
+    url = f"{config['url']}/rest/api/3/search"
+    headers = {"Accept": "application/json"}
+    auth = (config["email"], config["token"])
+    params = {"jql": jql, "maxResults": 100}
+
+    response = requests.get(url, headers=headers, params=params, auth=auth)
+    if response.status_code == 200:
+        issues = response.json().get("issues", [])
+        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
