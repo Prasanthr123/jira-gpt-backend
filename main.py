@@ -209,3 +209,62 @@ async def get_tickets_by_reporter(reporter_email: str):
     else:
         return JSONResponse(status_code=response.status_code, content={"error": response.text})
 
+# 🔍 Fetch ticket comments
+@app.get("/ticket/{issue_key}/comments")
+async def get_ticket_comments(issue_key: str):
+    config = get_jira_config()
+    url = f"{config['url']}/rest/api/3/issue/{issue_key}/comment"
+    headers = {"Accept": "application/json"}
+    auth = (config["email"], config["token"])
+
+    response = requests.get(url, headers=headers, auth=auth)
+    if response.status_code == 200:
+        comments = response.json().get("comments", [])
+        return [
+            {
+                "id": c["id"],
+                "author": c["author"]["displayName"],
+                "body": c["body"]["content"][0]["content"][0]["text"] if c["body"]["content"] else "",
+                "created": c["created"]
+            }
+            for c in comments
+        ]
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+# 🔍 Post comment in the ticket
+@app.post("/ticket/{issue_key}/comments")
+async def add_ticket_comment(issue_key: str, req: Request):
+    config = get_jira_config()
+    url = f"{config['url']}/rest/api/3/issue/{issue_key}/comment"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+    auth = (config["email"], config["token"])
+    data = await req.json()
+
+    comment_text = data.get("body")
+    if not comment_text:
+        return JSONResponse(status_code=400, content={"error": "Missing comment body"})
+
+    payload = {
+        "body": {
+            "type": "doc",
+            "version": 1,
+            "content": [{
+                "type": "paragraph",
+                "content": [{
+                    "type": "text",
+                    "text": comment_text
+                }]
+            }]
+        }
+    }
+
+    response = requests.post(url, headers=headers, auth=auth, json=payload)
+    if response.status_code == 201:
+        return {"message": "Comment added successfully."}
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
