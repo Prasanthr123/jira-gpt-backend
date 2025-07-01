@@ -15,7 +15,7 @@ def get_jira_config():
     }
 
 # Create Jira Ticket
-@app.post("/")
+@app.post("/ticket")  # ← changed from "/"
 async def create_jira_story(req: Request):
     data = await req.json()
     summary = data.get("summary")
