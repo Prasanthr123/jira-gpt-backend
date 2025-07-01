@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import os
@@ -124,5 +123,20 @@ async def delete_jira_ticket(issue_key: str):
     response = requests.delete(url, headers=headers, auth=auth)
     if response.status_code == 204:
         return {"message": f"Ticket {issue_key} deleted successfully"}
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+# 🔥 Fetch all Jira Projects
+@app.get("/projects")
+async def get_jira_projects():
+    config = get_jira_config()
+    url = f"{config['url']}/rest/api/3/project"
+    auth = (config["email"], config["token"])
+    headers = {"Accept": "application/json"}
+
+    response = requests.get(url, headers=headers, auth=auth)
+    if response.status_code == 200:
+        projects = response.json()
+        return [{"key": p["key"], "name": p["name"]} for p in projects]
     else:
         return JSONResponse(status_code=response.status_code, content={"error": response.text})
