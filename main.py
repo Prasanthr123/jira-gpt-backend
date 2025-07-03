@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import os
@@ -15,7 +16,7 @@ def get_jira_config():
     }
 
 # Create Jira Ticket
-@app.post("/ticket")  # ← changed from "/"
+@app.post("/ticket")
 async def create_jira_story(req: Request):
     data = await req.json()
     summary = data.get("summary")
@@ -112,104 +113,7 @@ async def update_jira_ticket(issue_key: str, req: Request):
     else:
         return JSONResponse(status_code=response.status_code, content={"error": response.text})
 
-# Delete Jira Ticket
-@app.delete("/ticket/{issue_key}")
-async def delete_jira_ticket(issue_key: str):
-    config = get_jira_config()
-    url = f"{config['url']}/rest/api/3/issue/{issue_key}"
-    auth = (config["email"], config["token"])
-    headers = {"Accept": "application/json"}
-
-    response = requests.delete(url, headers=headers, auth=auth)
-    if response.status_code == 204:
-        return {"message": f"Ticket {issue_key} deleted successfully"}
-    else:
-        return JSONResponse(status_code=response.status_code, content={"error": response.text})
-
-# 🔥 Fetch all Jira Projects
-@app.get("/projects")
-async def get_jira_projects():
-    config = get_jira_config()
-    url = f"{config['url']}/rest/api/3/project"
-    auth = (config["email"], config["token"])
-    headers = {"Accept": "application/json"}
-
-    response = requests.get(url, headers=headers, auth=auth)
-    if response.status_code == 200:
-        projects = response.json()
-        return [{"key": p["key"], "name": p["name"]} for p in projects]
-    else:
-        return JSONResponse(status_code=response.status_code, content={"error": response.text})
-
-# 🔍 Fetch tickets by Sprint ID
-@app.get("/tickets/sprint/{sprint_id}")
-async def get_tickets_by_sprint(sprint_id: int):
-    config = get_jira_config()
-    jql = f"project = {config['project_key']} AND sprint = {sprint_id}"
-    url = f"{config['url']}/rest/api/3/search"
-    headers = {"Accept": "application/json"}
-    auth = (config["email"], config["token"])
-    params = {"jql": jql, "maxResults": 100}
-
-    response = requests.get(url, headers=headers, params=params, auth=auth)
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
-    else:
-        return JSONResponse(status_code=response.status_code, content={"error": response.text})
-        
-# 🔍 Fetch tickets by Priority
-@app.get("/tickets/priority/{priority}")
-async def get_tickets_by_priority(priority: str):
-    config = get_jira_config()
-    jql = f'project = {config["project_key"]} AND priority = "{priority}"'
-    url = f"{config['url']}/rest/api/3/search"
-    headers = {"Accept": "application/json"}
-    auth = (config["email"], config["token"])
-    params = {"jql": jql, "maxResults": 100}
-
-    response = requests.get(url, headers=headers, params=params, auth=auth)
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
-    else:
-        return JSONResponse(status_code=response.status_code, content={"error": response.text})
-
-# 🔍 Fetch tickets by label
-@app.get("/tickets/label/{label}")
-async def get_tickets_by_label(label: str):
-    config = get_jira_config()
-    jql = f'project = {config["project_key"]} AND labels = "{label}"'
-    url = f"{config['url']}/rest/api/3/search"
-    headers = {"Accept": "application/json"}
-    auth = (config["email"], config["token"])
-    params = {"jql": jql, "maxResults": 100}
-
-    response = requests.get(url, headers=headers, params=params, auth=auth)
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
-    else:
-        return JSONResponse(status_code=response.status_code, content={"error": response.text})
-
-# 🔍 Fetch tickets by labe
-@app.get("/tickets/reporter/{reporter_email}")
-async def get_tickets_by_reporter(reporter_email: str):
-    config = get_jira_config()
-    jql = f'project = {config["project_key"]} AND reporter = "{reporter_email}"'
-    url = f"{config['url']}/rest/api/3/search"
-    headers = {"Accept": "application/json"}
-    auth = (config["email"], config["token"])
-    params = {"jql": jql, "maxResults": 100}
-
-    response = requests.get(url, headers=headers, params=params, auth=auth)
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
-    else:
-        return JSONResponse(status_code=response.status_code, content={"error": response.text})
-
-# 🔍 Fetch ticket comments
+# Get Ticket Comments
 @app.get("/ticket/{issue_key}/comments")
 async def get_ticket_comments(issue_key: str):
     config = get_jira_config()
@@ -232,7 +136,7 @@ async def get_ticket_comments(issue_key: str):
     else:
         return JSONResponse(status_code=response.status_code, content={"error": response.text})
 
-# 🔍 Post comment in the ticket
+# Add Ticket Comment
 @app.post("/ticket/{issue_key}/comments")
 async def add_ticket_comment(issue_key: str, req: Request):
     config = get_jira_config()
@@ -243,7 +147,6 @@ async def add_ticket_comment(issue_key: str, req: Request):
     }
     auth = (config["email"], config["token"])
     data = await req.json()
-
     comment_text = data.get("body")
     if not comment_text:
         return JSONResponse(status_code=400, content={"error": "Missing comment body"})
@@ -261,18 +164,17 @@ async def add_ticket_comment(issue_key: str, req: Request):
             }]
         }
     }
-
     response = requests.post(url, headers=headers, auth=auth, json=payload)
     if response.status_code == 201:
         return {"message": "Comment added successfully."}
     else:
         return JSONResponse(status_code=response.status_code, content={"error": response.text})
 
-# 🔍 update a comment in the ticket
+# Update Ticket Comment
 @app.patch("/ticket/{issue_key}/comments/{comment_id}")
 async def update_ticket_comment(issue_key: str, comment_id: str, req: Request):
     config = get_jira_config()
-    user_email = config["email"]  # Logged-in user's email
+    user_email = config["email"]
     url = f"{config['url']}/rest/api/3/issue/{issue_key}/comment/{comment_id}"
     headers = {
         "Accept": "application/json",
@@ -281,18 +183,14 @@ async def update_ticket_comment(issue_key: str, comment_id: str, req: Request):
     auth = (user_email, config["token"])
     data = await req.json()
     new_text = data.get("body")
-    is_admin = data.get("is_admin", False)  # Pass admin flag from frontend
-
-    # Step 1: Check ownership
+    is_admin = data.get("is_admin", False)
     current = requests.get(url, headers=headers, auth=auth)
     if current.status_code != 200:
         return JSONResponse(status_code=current.status_code, content={"error": current.text})
-
     author_email = current.json().get("author", {}).get("emailAddress", "")
     if user_email != author_email and not is_admin:
         return JSONResponse(status_code=403, content={"error": "Permission denied"})
 
-    # Step 2: Patch new comment
     payload = {
         "body": {
             "type": "doc",
@@ -306,37 +204,56 @@ async def update_ticket_comment(issue_key: str, comment_id: str, req: Request):
             }]
         }
     }
-
     response = requests.put(url, headers=headers, auth=auth, json=payload)
     if response.status_code == 200:
         return {"message": "Comment updated successfully"}
     else:
         return JSONResponse(status_code=response.status_code, content={"error": response.text})
-        
-# 🔍 update a comment in the ticket
-@app.delete("/ticket/{issue_key}/comments/{comment_id}")
-async def delete_ticket_comment(issue_key: str, comment_id: str, req: Request):
+
+# Impact Analysis by Label
+@app.get("/impact/label/{label}")
+async def get_impact_by_label(label: str):
     config = get_jira_config()
-    user_email = config["email"]
-    url = f"{config['url']}/rest/api/3/issue/{issue_key}/comment/{comment_id}"
+    jql = f'project = {config["project_key"]} AND labels = "{label}"'
+    url = f"{config['url']}/rest/api/3/search"
     headers = {"Accept": "application/json"}
-    auth = (user_email, config["token"])
-    data = await req.json()
-    is_admin = data.get("is_admin", False)
-
-    # Step 1: Check ownership
-    current = requests.get(url, headers=headers, auth=auth)
-    if current.status_code != 200:
-        return JSONResponse(status_code=current.status_code, content={"error": current.text})
-
-    author_email = current.json().get("author", {}).get("emailAddress", "")
-    if user_email != author_email and not is_admin:
-        return JSONResponse(status_code=403, content={"error": "Permission denied"})
-
-    # Step 2: Delete comment
-    response = requests.delete(url, headers=headers, auth=auth)
-    if response.status_code == 204:
-        return {"message": "Comment deleted successfully"}
+    auth = (config["email"], config["token"])
+    params = {"jql": jql, "maxResults": 100}
+    response = requests.get(url, headers=headers, params=params, auth=auth)
+    if response.status_code == 200:
+        issues = response.json().get("issues", [])
+        return [{"key": i["key"], "summary": i["fields"]["summary"], "description": i["fields"]["description"]} for i in issues]
     else:
         return JSONResponse(status_code=response.status_code, content={"error": response.text})
 
+# Impact Analysis by Component
+@app.get("/impact/component/{component}")
+async def get_impact_by_component(component: str):
+    config = get_jira_config()
+    jql = f'project = {config["project_key"]} AND component = "{component}"'
+    url = f"{config['url']}/rest/api/3/search"
+    headers = {"Accept": "application/json"}
+    auth = (config["email"], config["token"])
+    params = {"jql": jql, "maxResults": 100}
+    response = requests.get(url, headers=headers, params=params, auth=auth)
+    if response.status_code == 200:
+        issues = response.json().get("issues", [])
+        return [{"key": i["key"], "summary": i["fields"]["summary"], "description": i["fields"]["description"]} for i in issues]
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+# Impact Analysis by Module or Title Keyword
+@app.get("/impact/module/{keyword}")
+async def get_impact_by_module(keyword: str):
+    config = get_jira_config()
+    jql = f'project = {config["project_key"]} AND summary ~ "{keyword}"'
+    url = f"{config['url']}/rest/api/3/search"
+    headers = {"Accept": "application/json"}
+    auth = (config["email"], config["token"])
+    params = {"jql": jql, "maxResults": 100}
+    response = requests.get(url, headers=headers, params=params, auth=auth)
+    if response.status_code == 200:
+        issues = response.json().get("issues", [])
+        return [{"key": i["key"], "summary": i["fields"]["summary"], "description": i["fields"]["description"]} for i in issues]
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
