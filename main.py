@@ -43,7 +43,7 @@ def start_oauth():
         "audience": "api.atlassian.com",
         "client_id": CLIENT_ID,
         "scope": " ".join(SCOPES),
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": OAUTH_REDIRECT_URI,
         "state": "secureState123",
         "response_type": "code",
         "prompt": "consent"
@@ -61,7 +61,7 @@ async def oauth_callback(request: Request):
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
         "code": code,
-        "redirect_uri": REDIRECT_URI
+        "redirect_uri": OAUTH_REDIRECT_URI
     }
     token_response = requests.post(TOKEN_URL, json=payload)
     if token_response.status_code != 200:
