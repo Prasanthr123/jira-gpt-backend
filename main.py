@@ -24,9 +24,9 @@ logging.basicConfig(
 logger = logging.getLogger("jira-oauth-backend")
 
 # OAuth setup
-CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID", "your-client-id")
-CLIENT_SECRET = os.getenv("ATLASSIAN_CLIENT_SECRET", "your-client-secret")
-REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "https://jira-gpt-backend.onrender.com/oauth/callback")
+CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
+CLIENT_SECRET = os.getenv("ATLASSIAN_CLIENT_SECRET")
+REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI")
 AUTH_BASE_URL = "https://auth.atlassian.com/authorize"
 TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 USER_API_URL = "https://api.atlassian.com/me"
