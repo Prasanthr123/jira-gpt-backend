@@ -15,6 +15,21 @@ def get_jira_config():
         "project_key": os.getenv("JIRA_PROJECT")
     }
 
+@app.get("/projects")
+async def get_jira_projects():
+    config = get_jira_config()
+    url = f"{config['url']}/rest/api/3/project"
+    auth = (config["email"], config["token"])
+    headers = {"Accept": "application/json"}
+
+    response = requests.get(url, headers=headers, auth=auth)
+    if response.status_code == 200:
+        projects = response.json()
+        return [{"key": p["key"], "name": p["name"]} for p in projects]
+    else:
+        return JSONResponse(status_code=response.status_code, content={"error": response.text})
+
+
 # Create Jira Ticket
 @app.post("/ticket")
 async def create_jira_story(req: Request):
