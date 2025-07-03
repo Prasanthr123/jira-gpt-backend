@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,9 +32,8 @@ USER_API_URL = "https://api.atlassian.com/me"
 RESOURCE_API = "https://api.atlassian.com/oauth/token/accessible-resources"
 SCOPES = ["read:jira-work", "write:jira-work", "read:jira-user"]
 user_tokens = {}
-logger.info(f"✅ Loaded OAuth ENV: REDIRECT_URI = {REDIRECT_URI}")
-logger.info(f"✅ Loaded OAuth ENV: CLIENT_ID = {CLIENT_ID[:6]}****")  # Masking for security
 
+logger.info("✅ Loaded OAuth ENV: CLIENT_ID and REDIRECT_URI are set")
 
 @app.get("/oauth/login")
 def start_oauth():
@@ -43,7 +41,7 @@ def start_oauth():
         "audience": "api.atlassian.com",
         "client_id": CLIENT_ID,
         "scope": " ".join(SCOPES),
-        "redirect_uri": OAUTH_REDIRECT_URI,
+        "redirect_uri": REDIRECT_URI,
         "state": "secureState123",
         "response_type": "code",
         "prompt": "consent"
@@ -61,7 +59,7 @@ async def oauth_callback(request: Request):
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
         "code": code,
-        "redirect_uri": OAUTH_REDIRECT_URI
+        "redirect_uri": REDIRECT_URI
     }
     token_response = requests.post(TOKEN_URL, json=payload)
     if token_response.status_code != 200:
@@ -84,10 +82,11 @@ async def oauth_callback(request: Request):
     logger.info(f"OAuth Success | User: {user_id}")
     return {"message": "OAuth successful", "user": user_id, "cloud_id": cloud_id}
 
-def get_auth_headers(x_user_id: str = Depends(lambda: "unknown")):
-    data = user_tokens.get(x_user_id)
-    if not data:
+def get_auth_headers(request: Request):
+    x_user_id = request.headers.get("X-User-Id")
+    if not x_user_id or x_user_id not in user_tokens:
         raise HTTPException(status_code=401, detail="User not authenticated")
+    data = user_tokens[x_user_id]
     return {
         "Authorization": f"Bearer {data['access_token']}",
         "Accept": "application/json",
@@ -105,26 +104,23 @@ async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
 async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
     data = await request.json()
-    logger.info(f"User: {request.headers.get('X-User-Id')} | Action: Create Ticket")
     payload = {
         "fields": {
             "project": {"key": data.get("project_key")},
             "summary": data.get("summary"),
             "description": {
-                "type": "doc",
-                "version": 1,
-                "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("description") or ""}]}]
+                "type": "doc", "version": 1,
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("description", "")}]}]
             },
             "issuetype": {"name": data.get("issue_type", "Bug")}
         }
     }
     res = requests.post(f"{base_url}/rest/api/3/issue", headers=headers, json=payload)
-    return res.json()
+    return res.json() if res.status_code != 201 else {"message": "Ticket created"}
 
 @app.get("/ticket/{issue_key}")
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    logger.info(f"User: {request.headers.get('X-User-Id')} | Action: Fetch Ticket {issue_key}")
     res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
     return res.json()
 
@@ -132,14 +128,12 @@ async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_a
 async def update_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
     data = await request.json()
-    logger.info(f"User: {request.headers.get('X-User-Id')} | Action: Update Ticket {issue_key}")
     update_fields = {}
     if "summary" in data:
         update_fields["summary"] = data["summary"]
     if "description" in data:
         update_fields["description"] = {
-            "type": "doc",
-            "version": 1,
+            "type": "doc", "version": 1,
             "content": [{"type": "paragraph", "content": [{"type": "text", "text": data["description"]}]}]
         }
     res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers, json={"fields": update_fields})
@@ -148,7 +142,6 @@ async def update_ticket(issue_key: str, request: Request, auth_data=Depends(get_
 @app.get("/ticket/{issue_key}/comments")
 async def get_comments(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    logger.info(f"User: {request.headers.get('X-User-Id')} | Action: Get Comments {issue_key}")
     res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
     return res.json()
 
@@ -156,12 +149,10 @@ async def get_comments(issue_key: str, request: Request, auth_data=Depends(get_a
 async def add_comment(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
     data = await request.json()
-    logger.info(f"User: {request.headers.get('X-User-Id')} | Action: Add Comment {issue_key}")
     payload = {
         "body": {
-            "type": "doc",
-            "version": 1,
-            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("body") or ""}]}]
+            "type": "doc", "version": 1,
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("body", "")}]}]
         }
     }
     res = requests.post(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers, json=payload)
@@ -171,80 +162,49 @@ async def add_comment(issue_key: str, request: Request, auth_data=Depends(get_au
 async def update_comment(issue_key: str, comment_id: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
     data = await request.json()
-    logger.info(f"User: {request.headers.get('X-User-Id')} | Action: Update Comment {comment_id}")
     payload = {
         "body": {
-            "type": "doc",
-            "version": 1,
-            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("body") or ""}]}]
+            "type": "doc", "version": 1,
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("body", "")}]}]
         }
     }
     res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}/comment/{comment_id}", headers=headers, json=payload)
     return {"message": "Comment updated"} if res.status_code == 200 else res.json()
 
-# 🔍 Impact Analysis by Label
+# Impact analysis routes
+def jql_search(jql: str, headers, base_url):
+    res = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
+    if res.status_code == 200:
+        return [{"key": i["key"], "summary": i["fields"]["summary"], "description": i["fields"]["description"]}
+                for i in res.json().get("issues", [])]
+    return JSONResponse(status_code=res.status_code, content={"error": res.text})
+
 @app.get("/impact/label/{label}")
 async def get_impact_by_label(label: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    jql = f'labels = "{label}"'
-    response = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"], "description": i["fields"]["description"]} for i in issues]
-    return JSONResponse(status_code=response.status_code, content={"error": response.text})
+    return jql_search(f'labels = "{label}"', headers, base_url)
 
-# 🔍 Impact Analysis by Component
 @app.get("/impact/component/{component}")
 async def get_impact_by_component(component: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    jql = f'component = "{component}"'
-    response = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"], "description": i["fields"]["description"]} for i in issues]
-    return JSONResponse(status_code=response.status_code, content={"error": response.text})
+    return jql_search(f'component = "{component}"', headers, base_url)
 
-# 🔍 Impact Analysis by Module or Title Keyword
 @app.get("/impact/module/{keyword}")
 async def get_impact_by_module(keyword: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    jql = f'summary ~ "{keyword}"'
-    response = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"], "description": i["fields"]["description"]} for i in issues]
-    return JSONResponse(status_code=response.status_code, content={"error": response.text})
+    return jql_search(f'summary ~ "{keyword}"', headers, base_url)
 
-# 🔍 Fetch tickets by Sprint ID
 @app.get("/tickets/sprint/{sprint_id}")
 async def get_tickets_by_sprint(sprint_id: int, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    jql = f"sprint = {sprint_id}"
-    response = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
-    return JSONResponse(status_code=response.status_code, content={"error": response.text})
+    return jql_search(f"sprint = {sprint_id}", headers, base_url)
 
-# 🔍 Fetch tickets by Priority
 @app.get("/tickets/priority/{priority}")
 async def get_tickets_by_priority(priority: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    jql = f'priority = "{priority}"'
-    response = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
-    return JSONResponse(status_code=response.status_code, content={"error": response.text})
+    return jql_search(f'priority = "{priority}"', headers, base_url)
 
-# 🔍 Fetch tickets by Label
 @app.get("/tickets/label/{label}")
 async def get_tickets_by_label(label: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    jql = f'labels = "{label}"'
-    response = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
-    if response.status_code == 200:
-        issues = response.json().get("issues", [])
-        return [{"key": i["key"], "summary": i["fields"]["summary"]} for i in issues]
-    return JSONResponse(status_code=response.status_code, content={"error": response.text})
-
+    return jql_search(f'labels = "{label}"', headers, base_url)
