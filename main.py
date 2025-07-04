@@ -25,7 +25,7 @@ logger = logging.getLogger("jira-oauth-backend")
 # OAuth setup
 CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ATLASSIAN_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI")
+REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI").strip()
 AUTH_BASE_URL = "https://auth.atlassian.com/authorize"
 TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 USER_API_URL = "https://api.atlassian.com/me"
