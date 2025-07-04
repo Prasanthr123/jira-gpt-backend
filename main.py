@@ -53,7 +53,6 @@ async def oauth_callback(request: Request):
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(status_code=400, detail="Missing code")
-
     payload = {
         "grant_type": "authorization_code",
         "client_id": CLIENT_ID,
@@ -61,33 +60,25 @@ async def oauth_callback(request: Request):
         "code": code,
         "redirect_uri": REDIRECT_URI
     }
-
     token_response = requests.post(TOKEN_URL, json=payload)
     if token_response.status_code != 200:
         return JSONResponse(status_code=token_response.status_code, content=token_response.json())
-
     tokens = token_response.json()
     access_token = tokens["access_token"]
     headers = {"Authorization": f"Bearer {access_token}"}
-
     user_info = requests.get(USER_API_URL, headers=headers).json()
     user_id = user_info.get("account_id", f"user_{uuid.uuid4()}")
-
     cloud_info = requests.get(RESOURCE_API, headers=headers).json()
     if not cloud_info:
         raise HTTPException(status_code=400, detail="No accessible Jira site found")
-
     cloud_id = cloud_info[0]["id"]
     base_url = f"https://api.atlassian.com/ex/jira/{cloud_id}"
-
     user_tokens[user_id] = {
         "access_token": access_token,
         "cloud_id": cloud_id,
         "base_url": base_url
     }
-
     logger.info(f"OAuth Success | User: {user_id}")
-
     return HTMLResponse(
         content="<h2>✅ Jira OAuth Login Successful!</h2><p>You can now return to ChatGPT and continue using the assistant.</p>",
         status_code=200
@@ -95,8 +86,10 @@ async def oauth_callback(request: Request):
 
 def get_auth_headers(request: Request):
     x_user_id = request.headers.get("X-User-Id")
-    if not x_user_id or x_user_id not in user_tokens:
-        raise HTTPException(status_code=401, detail="User not authenticated")
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Missing X-User-Id header. Please log in.")
+    if x_user_id not in user_tokens:
+        raise HTTPException(status_code=401, detail="Session expired or user not authenticated.")
     data = user_tokens[x_user_id]
     return {
         "Authorization": f"Bearer {data['access_token']}",
@@ -181,7 +174,6 @@ async def update_comment(issue_key: str, comment_id: str, request: Request, auth
     res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}/comment/{comment_id}", headers=headers, json=payload)
     return {"message": "Comment updated"} if res.status_code == 200 else res.json()
 
-# Impact analysis helper
 def jql_search(jql: str, headers, base_url):
     res = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
     if res.status_code == 200:
