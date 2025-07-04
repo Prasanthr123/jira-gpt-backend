@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-import os, requests, urllib.parse, logging, sys
+import os, requests, urllib.parse, logging, sys, uuid
 
 app = FastAPI()
 
@@ -25,15 +25,14 @@ logger = logging.getLogger("jira-oauth-backend")
 # OAuth setup
 CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ATLASSIAN_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI").strip()
+REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip()
+
 AUTH_BASE_URL = "https://auth.atlassian.com/authorize"
 TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 USER_API_URL = "https://api.atlassian.com/me"
 RESOURCE_API = "https://api.atlassian.com/oauth/token/accessible-resources"
 SCOPES = ["read:jira-work", "write:jira-work", "read:jira-user"]
 user_tokens = {}
-
-logger.info("✅ Loaded OAuth ENV: CLIENT_ID and REDIRECT_URI are set")
 
 @app.get("/oauth/login")
 def start_oauth():
@@ -54,6 +53,7 @@ async def oauth_callback(request: Request):
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(status_code=400, detail="Missing code")
+
     payload = {
         "grant_type": "authorization_code",
         "client_id": CLIENT_ID,
@@ -61,26 +61,37 @@ async def oauth_callback(request: Request):
         "code": code,
         "redirect_uri": REDIRECT_URI
     }
+
     token_response = requests.post(TOKEN_URL, json=payload)
     if token_response.status_code != 200:
         return JSONResponse(status_code=token_response.status_code, content=token_response.json())
+
     tokens = token_response.json()
     access_token = tokens["access_token"]
     headers = {"Authorization": f"Bearer {access_token}"}
+
     user_info = requests.get(USER_API_URL, headers=headers).json()
-    user_id = user_info.get("email", "unknown@example.com")
+    user_id = user_info.get("account_id", f"user_{uuid.uuid4()}")
+
     cloud_info = requests.get(RESOURCE_API, headers=headers).json()
     if not cloud_info:
         raise HTTPException(status_code=400, detail="No accessible Jira site found")
+
     cloud_id = cloud_info[0]["id"]
     base_url = f"https://api.atlassian.com/ex/jira/{cloud_id}"
+
     user_tokens[user_id] = {
         "access_token": access_token,
         "cloud_id": cloud_id,
         "base_url": base_url
     }
+
     logger.info(f"OAuth Success | User: {user_id}")
-    return {"message": "OAuth successful", "user": user_id, "cloud_id": cloud_id}
+
+    return HTMLResponse(
+        content="<h2>✅ Jira OAuth Login Successful!</h2><p>You can now return to ChatGPT and continue using the assistant.</p>",
+        status_code=200
+    )
 
 def get_auth_headers(request: Request):
     x_user_id = request.headers.get("X-User-Id")
@@ -96,7 +107,6 @@ def get_auth_headers(request: Request):
 @app.get("/projects")
 async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    logger.info(f"User: {request.headers.get('X-User-Id')} | Action: Fetch Projects")
     res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
     return res.json()
 
@@ -171,7 +181,7 @@ async def update_comment(issue_key: str, comment_id: str, request: Request, auth
     res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}/comment/{comment_id}", headers=headers, json=payload)
     return {"message": "Comment updated"} if res.status_code == 200 else res.json()
 
-# Impact analysis routes
+# Impact analysis helper
 def jql_search(jql: str, headers, base_url):
     res = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
     if res.status_code == 200:
@@ -203,8 +213,3 @@ async def get_tickets_by_sprint(sprint_id: int, request: Request, auth_data=Depe
 async def get_tickets_by_priority(priority: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
     return jql_search(f'priority = "{priority}"', headers, base_url)
-
-@app.get("/tickets/label/{label}")
-async def get_tickets_by_label(label: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
-    return jql_search(f'labels = "{label}"', headers, base_url)
