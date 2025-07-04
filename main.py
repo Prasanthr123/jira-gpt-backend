@@ -90,17 +90,31 @@ async def oauth_callback(request: Request):
     )
 
 def get_auth_headers(request: Request):
-    x_user_id = request.headers.get("X-User-Id")
+    # Log all incoming headers for debugging
+    logger.info(f"Incoming headers: {dict(request.headers)}")
+
+    # Try different common capitalizations to get user ID header
+    x_user_id = (
+        request.headers.get("X-User-Id")
+        or request.headers.get("x-user-id")
+        or request.headers.get("X-user-id")
+        or request.headers.get("x-User-Id")
+    )
+
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-Id header. Please log in.")
+
     if x_user_id not in user_tokens:
         raise HTTPException(status_code=401, detail="Session expired or user not authenticated.")
+
     data = user_tokens[x_user_id]
+
     return {
         "Authorization": f"Bearer {data['access_token']}",
         "Accept": "application/json",
         "Content-Type": "application/json"
     }, data["base_url"]
+
 
 @app.get("/projects")
 async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
