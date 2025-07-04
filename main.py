@@ -90,15 +90,15 @@ async def oauth_callback(request: Request):
     )
 
 def get_auth_headers(request: Request):
-    # Prefer query param over header
-    x_user_id = (
-        request.query_params.get("user_id") or
-        request.headers.get("X-User-Id") or
-        request.headers.get("x-user-id")
-    )
+    # Log all incoming headers for debugging (optional)
+    logger.info(f"Incoming headers: {dict(request.headers)}")
+    logger.info(f"Incoming query params: {dict(request.query_params)}")
+
+    # Get from query param (new method)
+    x_user_id = request.query_params.get("user_id")
 
     if not x_user_id:
-        raise HTTPException(status_code=401, detail="Missing user ID. Please log in.")
+        raise HTTPException(status_code=401, detail="Missing user_id. Please log in via /oauth/login.")
 
     if x_user_id not in user_tokens:
         raise HTTPException(status_code=401, detail="Session expired or user not authenticated.")
@@ -110,7 +110,6 @@ def get_auth_headers(request: Request):
         "Accept": "application/json",
         "Content-Type": "application/json"
     }, data["base_url"]
-
 
 @app.get("/projects")
 async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
