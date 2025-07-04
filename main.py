@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -90,21 +91,14 @@ async def oauth_callback(request: Request):
     )
 
 def get_auth_headers(request: Request):
-    # Log all incoming headers for debugging (optional)
     logger.info(f"Incoming headers: {dict(request.headers)}")
     logger.info(f"Incoming query params: {dict(request.query_params)}")
-
-    # Get from query param (new method)
     x_user_id = request.query_params.get("user_id")
-
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Missing user_id. Please log in via /oauth/login.")
-
     if x_user_id not in user_tokens:
         raise HTTPException(status_code=401, detail="Session expired or user not authenticated.")
-
     data = user_tokens[x_user_id]
-
     return {
         "Authorization": f"Bearer {data['access_token']}",
         "Accept": "application/json",
@@ -188,27 +182,51 @@ async def update_comment(issue_key: str, comment_id: str, request: Request, auth
     res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}/comment/{comment_id}", headers=headers, json=payload)
     return {"message": "Comment updated"} if res.status_code == 200 else res.json()
 
-def jql_search(jql: str, headers, base_url):
+def jql_search(jql: str, headers, base_url, source_ticket_key: str = None):
     res = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
     if res.status_code == 200:
-        return [{"key": i["key"], "summary": i["fields"]["summary"], "description": i["fields"]["description"]}
-                for i in res.json().get("issues", [])]
+        issues = []
+        for i in res.json().get("issues", []):
+            key = i["key"]
+            if source_ticket_key and key == source_ticket_key:
+                logger.info(f"Skipping source ticket {key} from impact analysis.")
+                continue
+            issue_type = i["fields"].get("issuetype", {}).get("name", "").lower()
+            description = i["fields"].get("description", "")
+            if issue_type in ["epic", "parent"]:
+                if not description:
+                    logger.info(f"Skipping Epic/Parent ticket {key} with no description.")
+                    continue
+                text = description if isinstance(description, str) else str(description)
+                logic_keywords = ["verify", "check", "validate", "flow", "test", "should"]
+                if not any(word in text.lower() for word in logic_keywords):
+                    logger.info(f"Skipping Epic/Parent ticket {key} without logic keywords.")
+                    continue
+            issues.append({
+                "key": key,
+                "summary": i["fields"]["summary"],
+                "description": description
+            })
+        return issues
     return JSONResponse(status_code=res.status_code, content={"error": res.text})
 
 @app.get("/impact/label/{label}")
 async def get_impact_by_label(label: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    return jql_search(f'labels = "{label}"', headers, base_url)
+    source_ticket_key = request.query_params.get("source_ticket")
+    return jql_search(f'labels = "{label}"', headers, base_url, source_ticket_key)
 
 @app.get("/impact/component/{component}")
 async def get_impact_by_component(component: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    return jql_search(f'component = "{component}"', headers, base_url)
+    source_ticket_key = request.query_params.get("source_ticket")
+    return jql_search(f'component = "{component}"', headers, base_url, source_ticket_key)
 
 @app.get("/impact/module/{keyword}")
 async def get_impact_by_module(keyword: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
-    return jql_search(f'summary ~ "{keyword}"', headers, base_url)
+    source_ticket_key = request.query_params.get("source_ticket")
+    return jql_search(f'summary ~ "{keyword}"', headers, base_url, source_ticket_key)
 
 @app.get("/tickets/sprint/{sprint_id}")
 async def get_tickets_by_sprint(sprint_id: int, request: Request, auth_data=Depends(get_auth_headers)):
