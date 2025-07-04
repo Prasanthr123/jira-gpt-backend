@@ -90,19 +90,15 @@ async def oauth_callback(request: Request):
     )
 
 def get_auth_headers(request: Request):
-    # Log all incoming headers for debugging
-    logger.info(f"Incoming headers: {dict(request.headers)}")
-
-    # Try different common capitalizations to get user ID header
+    # Prefer query param over header
     x_user_id = (
-        request.headers.get("X-User-Id")
-        or request.headers.get("x-user-id")
-        or request.headers.get("X-user-id")
-        or request.headers.get("x-User-Id")
+        request.query_params.get("user_id") or
+        request.headers.get("X-User-Id") or
+        request.headers.get("x-user-id")
     )
 
     if not x_user_id:
-        raise HTTPException(status_code=401, detail="Missing X-User-Id header. Please log in.")
+        raise HTTPException(status_code=401, detail="Missing user ID. Please log in.")
 
     if x_user_id not in user_tokens:
         raise HTTPException(status_code=401, detail="Session expired or user not authenticated.")
