@@ -79,10 +79,14 @@ async def oauth_callback(request: Request):
         "base_url": base_url
     }
     logger.info(f"OAuth Success | User: {user_id}")
-    return HTMLResponse(
-        content="<h2>✅ Jira OAuth Login Successful!</h2><p>You can now return to ChatGPT and continue using the assistant.</p>",
-        status_code=200
-    )
+   return HTMLResponse(
+    content=f"""
+    <h2>✅ Jira OAuth Login Successful!</h2>
+    <p>You can now return to ChatGPT and continue using the assistant.</p>
+    <p><strong>Your Jira ID:</strong> <code>{user_id}</code></p>
+    """,
+    status_code=200
+)
 
 def get_auth_headers(request: Request):
     x_user_id = request.headers.get("X-User-Id")
