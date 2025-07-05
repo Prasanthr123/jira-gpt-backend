@@ -1,5 +1,3 @@
-06-07-2025
-
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
