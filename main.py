@@ -30,11 +30,12 @@ logger = logging.getLogger("human-friendly-logger")
 
 # Helper to extract initials
 def initials_from_display_name(name: str) -> str:
-    parts = name.strip().split()
-    if not parts:
-        return "U.N."  # Unknown Name
-    first = parts[0][0] if len(parts[0]) > 0 else ""
-    last = parts[-1][0] if len(parts) > 1 else first
+    name = name.strip()
+    if not name:
+        return "U.U."  # Unknown User
+    parts = name.split()
+    first = parts[0][0] if len(parts) > 0 and len(parts[0]) > 0 else "U"
+    last = parts[-1][0] if len(parts) > 1 and len(parts[-1]) > 0 else first
     return f"{first.upper()}.{last.upper()}."
 
 # Middleware to log all requests/responses with friendly context
@@ -125,7 +126,10 @@ async def oauth_callback(request: Request):
     user_info = requests.get(USER_API_URL, headers=headers).json()
     user_id = user_info.get("account_id", f"user_{uuid.uuid4()}")
     display_name = user_info.get("display_name", "Unknown User")
+    logger.info(f"🔍 Jira Display Name received: '{display_name}'")
     initials = initials_from_display_name(display_name)
+    if initials == "U.U.":
+    logger.warning(f"⚠️ Could not extract initials properly for Jira user_id: {user_id}")
     user_lookup[user_id] = initials
 
     cloud_info = requests.get(RESOURCE_API, headers=headers).json()
