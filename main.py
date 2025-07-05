@@ -16,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
- In-memory store for user tokens and name initials
+ # In-memory store for user tokens and name initials
 user_tokens = {}
 user_lookup = {}
 
@@ -38,7 +38,6 @@ def initials_from_display_name(name: str) -> str:
     last = parts[-1][0] if len(parts) > 1 and len(parts[-1]) > 0 else first
     return f"{first.upper()}.{last.upper()}."
 
-# Middleware to log all requests/responses with friendly context
 @app.middleware("http")
 async def user_friendly_logger(request: Request, call_next):
     user_id = request.query_params.get("user_id", "unknown_user")
@@ -72,12 +71,10 @@ async def user_friendly_logger(request: Request, call_next):
     logger.info("-" * 60)
     return response
 
-# Dummy root endpoint
 @app.get("/")
 async def home():
     return {"message": "Welcome to QA GPT backend"}
 
-# OAuth Configs
 CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ATLASSIAN_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip()
