@@ -127,9 +127,11 @@ async def oauth_callback(request: Request):
     user_id = user_info.get("account_id", f"user_{uuid.uuid4()}")
     display_name = user_info.get("display_name", "Unknown User")
     logger.info(f"🔍 Jira Display Name received: '{display_name}'")
-    initials = initials_from_display_name(display_name)
-    if initials == "U.U.":
+   initials = initials_from_display_name(display_name)
+
+if initials == "U.U.":
     logger.warning(f"⚠️ Could not extract initials properly for Jira user_id: {user_id}")
+
     user_lookup[user_id] = initials
 
     cloud_info = requests.get(RESOURCE_API, headers=headers).json()
