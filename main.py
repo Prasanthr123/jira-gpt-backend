@@ -120,34 +120,23 @@ async def oauth_callback(request: Request):
     access_token = tokens["access_token"]
     headers = {"Authorization": f"Bearer {access_token}"}
 
-    # First get user ID from /me
-me_info = requests.get(USER_API_URL, headers=headers).json()
-user_id = me_info.get("account_id", f"user_{uuid.uuid4()}")
+    # Get basic user ID
+    me_info = requests.get(USER_API_URL, headers=headers).json()
+    user_id = me_info.get("account_id", f"user_{uuid.uuid4()}")
 
-# Then get full profile from /myself
-cloud_info = requests.get(RESOURCE_API, headers=headers).json()
-if not cloud_info:
-    raise HTTPException(status_code=400, detail="No accessible Jira site found")
-cloud_id = cloud_info[0]["id"]
-base_url = f"https://api.atlassian.com/ex/jira/{cloud_id}"
-profile_info = requests.get(f"{base_url}/rest/api/3/myself", headers=headers).json()
-
-display_name = profile_info.get("displayName", "Unknown User")
-
-    user_id = user_info.get("account_id", f"user_{uuid.uuid4()}")
-    display_name = user_info.get("display_name", "Unknown User")
-    logger.info(f"🔍 Jira Display Name received: '{display_name}'")
-
-    initials = initials_from_display_name(display_name)
-    if initials == "U.U.":
-        logger.warning(f"⚠️ Could not extract initials properly for Jira user_id: {user_id}")
-    user_lookup[user_id] = initials
-
+    # Get display name
     cloud_info = requests.get(RESOURCE_API, headers=headers).json()
     if not cloud_info:
         raise HTTPException(status_code=400, detail="No accessible Jira site found")
     cloud_id = cloud_info[0]["id"]
     base_url = f"https://api.atlassian.com/ex/jira/{cloud_id}"
+    profile_info = requests.get(f"{base_url}/rest/api/3/myself", headers=headers).json()
+    display_name = profile_info.get("displayName", "Unknown User")
+
+    initials = initials_from_display_name(display_name)
+    if initials == "U.U.":
+        logger.warning(f"⚠️ Could not extract initials properly for Jira user_id: {user_id}")
+    user_lookup[user_id] = initials
 
     user_tokens[user_id] = {
         "access_token": access_token,
@@ -167,19 +156,6 @@ display_name = profile_info.get("displayName", "Unknown User")
         status_code=200
     )
 
-def get_auth_headers(request: Request):
-    x_user_id = request.query_params.get("user_id")
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail="Missing user_id. Please log in via /oauth/login.")
-    if x_user_id not in user_tokens:
-        raise HTTPException(status_code=401, detail="Session expired or user not authenticated.")
-
-    data = user_tokens[x_user_id]
-    return {
-        "Authorization": f"Bearer {data['access_token']}",
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-    }, data["base_url"]
 
 @app.get("/projects")
 async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
