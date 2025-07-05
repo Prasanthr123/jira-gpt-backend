@@ -16,26 +16,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Logging setup
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger("jira-oauth-backend")
 
+# Middleware for logging each request
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     user_id = request.query_params.get("user_id", "unknown_user")
     path = request.url.path
     method = request.method
-    ip = request.client.host
+    ip = request.client.host if request.client else "unknown_ip"
     timestamp = datetime.utcnow().isoformat()
 
-    logger.info(f"[User: {user_id}] {method} {path} from {ip} @ {timestamp}")
-    
+    # Log in structured readable format
+    logger.info(
+        f"User: {user_id:<36} | IP: {ip:<15} | {method:<4} {path:<30} | Time: {timestamp}"
+    )
+
     response = await call_next(request)
     return response
+
+# Dummy root route for testing
+@app.get("/")
+async def root():
+    return {"message": "Hello from QA GPT backend!"}
 
 # OAuth setup
 CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
