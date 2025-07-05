@@ -1,3 +1,4 @@
+06-07-2025
 
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
@@ -16,11 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
- # In-memory store for user tokens and name initials
-user_tokens = {}
-user_lookup = {}
-
-# Setup human-friendly log format
+# Human-friendly log formatter
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
@@ -28,25 +25,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("human-friendly-logger")
 
-# Helper to extract initials
-def initials_from_display_name(name: str) -> str:
-    name = name.strip()
-    if not name:
-        return "U.U."  # Unknown User
-    parts = name.split()
-    first = parts[0][0] if len(parts) > 0 and len(parts[0]) > 0 else "U"
-    last = parts[-1][0] if len(parts) > 1 and len(parts[-1]) > 0 else first
-    return f"{first.upper()}.{last.upper()}."
-
 @app.middleware("http")
 async def user_friendly_logger(request: Request, call_next):
     user_id = request.query_params.get("user_id", "unknown_user")
-    initials = user_lookup.get(user_id, user_id)
     ip = request.client.host if request.client else "unknown_ip"
     path = request.url.path
     method = request.method
     timestamp = datetime.utcnow().strftime("%b %d %Y %I:%M:%S %p")
 
+    # Custom action mapping
     action_map = {
         "/oauth/login": "started login",
         "/oauth/callback": "completed login",
@@ -58,8 +45,9 @@ async def user_friendly_logger(request: Request, call_next):
     }
     action = action_map.get(path, f"accessed {path}")
 
+    # Log the incoming request
     logger.info(f"\n📥 REQUEST | [{timestamp}]")
-    logger.info(f"User: {initials}")
+    logger.info(f"User ID: {user_id}")
     logger.info(f"IP Address: {ip}")
     logger.info(f"Action: {action}")
     logger.info(f"Method: {method}")
@@ -67,22 +55,27 @@ async def user_friendly_logger(request: Request, call_next):
 
     response: Response = await call_next(request)
 
+    # Log the response status
     logger.info(f"📤 RESPONSE | Status Code: {response.status_code}")
     logger.info("-" * 60)
+
     return response
 
 @app.get("/")
 async def home():
     return {"message": "Welcome to QA GPT backend"}
 
+# OAuth setup
 CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ATLASSIAN_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip()
+
 AUTH_BASE_URL = "https://auth.atlassian.com/authorize"
 TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 USER_API_URL = "https://api.atlassian.com/me"
 RESOURCE_API = "https://api.atlassian.com/oauth/token/accessible-resources"
 SCOPES = ["read:jira-work", "write:jira-work", "read:jira-user"]
+user_tokens = {}
 
 @app.get("/oauth/login")
 def start_oauth():
@@ -103,7 +96,6 @@ async def oauth_callback(request: Request):
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(status_code=400, detail="Missing code")
-
     payload = {
         "grant_type": "authorization_code",
         "client_id": CLIENT_ID,
@@ -111,41 +103,25 @@ async def oauth_callback(request: Request):
         "code": code,
         "redirect_uri": REDIRECT_URI
     }
-
     token_response = requests.post(TOKEN_URL, json=payload)
     if token_response.status_code != 200:
         return JSONResponse(status_code=token_response.status_code, content=token_response.json())
-
     tokens = token_response.json()
     access_token = tokens["access_token"]
     headers = {"Authorization": f"Bearer {access_token}"}
-
-    # Get basic user ID
-    me_info = requests.get(USER_API_URL, headers=headers).json()
-    user_id = me_info.get("account_id", f"user_{uuid.uuid4()}")
-
-    # Get display name
+    user_info = requests.get(USER_API_URL, headers=headers).json()
+    user_id = user_info.get("account_id", f"user_{uuid.uuid4()}")
     cloud_info = requests.get(RESOURCE_API, headers=headers).json()
     if not cloud_info:
         raise HTTPException(status_code=400, detail="No accessible Jira site found")
     cloud_id = cloud_info[0]["id"]
     base_url = f"https://api.atlassian.com/ex/jira/{cloud_id}"
-    profile_info = requests.get(f"{base_url}/rest/api/3/myself", headers=headers).json()
-    display_name = profile_info.get("displayName", "Unknown User")
-
-    initials = initials_from_display_name(display_name)
-    if initials == "U.U.":
-        logger.warning(f"⚠️ Could not extract initials properly for Jira user_id: {user_id}")
-    user_lookup[user_id] = initials
-
     user_tokens[user_id] = {
         "access_token": access_token,
         "cloud_id": cloud_id,
         "base_url": base_url
     }
-
-    logger.info(f"✅ OAuth Success | User: {initials} | ID: {user_id}")
-
+    logger.info(f"OAuth Success | User: {user_id}")
     return HTMLResponse(
         content=f"""
         <h2>✅ Jira OAuth Login Successful!</h2>
@@ -156,6 +132,20 @@ async def oauth_callback(request: Request):
         status_code=200
     )
 
+def get_auth_headers(request: Request):
+    logger.info(f"Incoming headers: {dict(request.headers)}")
+    logger.info(f"Incoming query params: {dict(request.query_params)}")
+    x_user_id = request.query_params.get("user_id")
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Missing user_id. Please log in via /oauth/login.")
+    if x_user_id not in user_tokens:
+        raise HTTPException(status_code=401, detail="Session expired or user not authenticated.")
+    data = user_tokens[x_user_id]
+    return {
+        "Authorization": f"Bearer {data['access_token']}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }, data["base_url"]
 
 @app.get("/projects")
 async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
