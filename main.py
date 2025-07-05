@@ -16,34 +16,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Human-friendly log formatter
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    format="%(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-logger = logging.getLogger("jira-oauth-backend")
+logger = logging.getLogger("human-friendly-logger")
 
-# Middleware for logging each request
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
+async def user_friendly_logger(request: Request, call_next):
     user_id = request.query_params.get("user_id", "unknown_user")
+    ip = request.client.host if request.client else "unknown_ip"
     path = request.url.path
     method = request.method
-    ip = request.client.host if request.client else "unknown_ip"
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = datetime.utcnow().strftime("%b %d %Y %I:%M:%S %p")
 
-    # Log in structured readable format
-    logger.info(
-        f"User: {user_id:<36} | IP: {ip:<15} | {method:<4} {path:<30} | Time: {timestamp}"
-    )
+    # Custom action mapping
+    action_map = {
+        "/oauth/login": "started login",
+        "/oauth/callback": "completed login",
+        "/generate_test_case": "requested test case generation",
+        "/report_defect": "reported a defect",
+        "/impact_analysis": "ran impact analysis",
+        "/ticket": "created a Jira ticket",
+        "/": "pinged home"
+    }
+    action = action_map.get(path, f"accessed {path}")
 
-    response = await call_next(request)
+    # Log the incoming request
+    logger.info(f"\n📥 REQUEST | [{timestamp}]")
+    logger.info(f"User ID: {user_id}")
+    logger.info(f"IP Address: {ip}")
+    logger.info(f"Action: {action}")
+    logger.info(f"Method: {method}")
+    logger.info(f"Path: {path}")
+
+    response: Response = await call_next(request)
+
+    # Log the response status
+    logger.info(f"📤 RESPONSE | Status Code: {response.status_code}")
+    logger.info("-" * 60)
+
     return response
 
-# Dummy root route for testing
 @app.get("/")
-async def root():
-    return {"message": "Hello from QA GPT backend!"}
+async def home():
+    return {"message": "Welcome to QA GPT backend"}
 
 # OAuth setup
 CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
