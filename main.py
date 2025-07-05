@@ -3,6 +3,7 @@ from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os, requests, urllib.parse, logging, sys, uuid
+from datetime import datetime
 
 app = FastAPI()
 
@@ -22,6 +23,19 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger("jira-oauth-backend")
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    user_id = request.query_params.get("user_id", "unknown_user")
+    path = request.url.path
+    method = request.method
+    ip = request.client.host
+    timestamp = datetime.utcnow().isoformat()
+
+    logger.info(f"[User: {user_id}] {method} {path} from {ip} @ {timestamp}")
+    
+    response = await call_next(request)
+    return response
 
 # OAuth setup
 CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
