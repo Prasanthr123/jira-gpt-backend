@@ -143,11 +143,11 @@ def get_auth_headers(request: Request):
         "Authorization": f"Bearer {data['access_token']}",
         "Accept": "application/json",
         "Content-Type": "application/json"
-    }, data["base_url"], data["project_key"]  # ✅ 3 values
+    }, data["base_url"], data["project_key"]
 
 @app.get("/projects")
 async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data  # ✅ Unpack all three
     res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
     return res.json()
 
@@ -156,7 +156,7 @@ async def set_project(request: Request):
     x_user_id = request.query_params.get("user_id")
     if not x_user_id or x_user_id not in user_tokens:
         raise HTTPException(status_code=401, detail="Unauthorized or session expired")
-    
+
     body = await request.json()
     project_key = body.get("project_key")
     if not project_key:
@@ -174,49 +174,37 @@ async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_a
     if issue_res.status_code != 200:
         return JSONResponse(status_code=issue_res.status_code, content={"error": issue_res.text})
 
-    try:
-        issue = issue_res.json()
-        fields = issue.get("fields", {})
+    issue = issue_res.json()
 
-        # Safe parsing
-        summary = fields.get("summary", "N/A")
-        description = fields.get("description", "N/A")
-        status = fields.get("status", {}).get("name", "Unknown")
-        labels = fields.get("labels", [])
-        environment = fields.get("environment", "Not specified")
-        attachments = fields.get("attachment", [])
+    comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
+    comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
 
-        comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
-        comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
+    attachments = issue["fields"].get("attachment", [])
 
-        return {
-            "key": issue_key,
-            "summary": summary,
-            "description": description,
-            "status": status,
-            "labels": labels,
-            "environment": environment,
-            "comments": comments,
-            "attachments": [
-                {
-                    "filename": att.get("filename"),
-                    "mimeType": att.get("mimeType"),
-                    "url": att.get("content")
-                } for att in attachments
-            ]
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Failed to parse ticket {issue_key}: {e}")
-        return JSONResponse(status_code=500, content={"error": f"Unexpected format in ticket {issue_key}", "details": str(e)})
+    return {
+        "key": issue_key,
+        "summary": issue["fields"].get("summary"),
+        "description": issue["fields"].get("description"),
+        "status": issue["fields"].get("status", {}).get("name"),
+        "labels": issue["fields"].get("labels", []),
+        "environment": issue["fields"].get("environment"),
+        "comments": comments,
+        "attachments": [
+            {
+                "filename": att.get("filename"),
+                "mimeType": att.get("mimeType"),
+                "url": att.get("content")
+            } for att in attachments
+        ]
+    }
 
 @app.post("/ticket")
 async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, project_key = auth_data  # ✅ updated unpacking
     data = await request.json()
     payload = {
         "fields": {
-            "project": {"key": data.get("project_key")},
+            "project": {"key": project_key},  # ✅ use session-stored key
             "summary": data.get("summary"),
             "description": {
                 "type": "doc", "version": 1,
@@ -228,15 +216,11 @@ async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
     res = requests.post(f"{base_url}/rest/api/3/issue", headers=headers, json=payload)
     return res.json() if res.status_code != 201 else {"message": "Ticket created"}
 
-#*@app.get("/ticket/{issue_key}")
-#async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
-    #headers, base_url = auth_data
-   # res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
-    #return res.json()
 
 @app.patch("/ticket/{issue_key}")
 async def update_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data  # ✅ added underscore for unused project_key
+
     data = await request.json()
     update_fields = {}
     if "summary" in data:
@@ -246,18 +230,20 @@ async def update_ticket(issue_key: str, request: Request, auth_data=Depends(get_
             "type": "doc", "version": 1,
             "content": [{"type": "paragraph", "content": [{"type": "text", "text": data["description"]}]}]
         }
+
     res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers, json={"fields": update_fields})
     return {"message": "Updated"} if res.status_code == 204 else res.json()
 
 @app.get("/ticket/{issue_key}/comments")
 async def get_comments(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data  # ✅ updated
     res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
     return res.json()
 
+
 @app.post("/ticket/{issue_key}/comments")
 async def add_comment(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data  # ✅ updated
     data = await request.json()
     payload = {
         "body": {
@@ -268,9 +254,10 @@ async def add_comment(issue_key: str, request: Request, auth_data=Depends(get_au
     res = requests.post(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers, json=payload)
     return res.json()
 
+
 @app.patch("/ticket/{issue_key}/comments/{comment_id}")
 async def update_comment(issue_key: str, comment_id: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data  # ✅ updated
     data = await request.json()
     payload = {
         "body": {
@@ -280,6 +267,7 @@ async def update_comment(issue_key: str, comment_id: str, request: Request, auth
     }
     res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}/comment/{comment_id}", headers=headers, json=payload)
     return {"message": "Comment updated"} if res.status_code == 200 else res.json()
+
 
 def jql_search(jql: str, headers, base_url, source_ticket_key: str = None):
     res = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
@@ -311,28 +299,28 @@ def jql_search(jql: str, headers, base_url, source_ticket_key: str = None):
 
 @app.get("/impact/label/{label}")
 async def get_impact_by_label(label: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data
     source_ticket_key = request.query_params.get("source_ticket")
     return jql_search(f'labels = "{label}"', headers, base_url, source_ticket_key)
 
 @app.get("/impact/component/{component}")
 async def get_impact_by_component(component: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data
     source_ticket_key = request.query_params.get("source_ticket")
     return jql_search(f'component = "{component}"', headers, base_url, source_ticket_key)
 
 @app.get("/impact/module/{keyword}")
 async def get_impact_by_module(keyword: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data
     source_ticket_key = request.query_params.get("source_ticket")
     return jql_search(f'summary ~ "{keyword}"', headers, base_url, source_ticket_key)
 
 @app.get("/tickets/sprint/{sprint_id}")
 async def get_tickets_by_sprint(sprint_id: int, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data
     return jql_search(f"sprint = {sprint_id}", headers, base_url)
 
 @app.get("/tickets/priority/{priority}")
 async def get_tickets_by_priority(priority: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
+    headers, base_url, _ = auth_data
     return jql_search(f'priority = "{priority}"', headers, base_url)
