@@ -131,19 +131,19 @@ async def oauth_callback(request: Request):
     )
 
 def get_auth_headers(request: Request):
-    logger.info(f"Incoming headers: {dict(request.headers)}")
-    logger.info(f"Incoming query params: {dict(request.query_params)}")
     x_user_id = request.query_params.get("user_id")
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Missing user_id. Please log in via /oauth/login.")
     if x_user_id not in user_tokens:
         raise HTTPException(status_code=401, detail="Session expired or user not authenticated.")
     data = user_tokens[x_user_id]
+    if not data.get("project_key"):
+        raise HTTPException(status_code=400, detail="Project key not set. Please call /set-project first.")
     return {
         "Authorization": f"Bearer {data['access_token']}",
         "Accept": "application/json",
         "Content-Type": "application/json"
-    }, data["base_url"]
+    }, data["base_url"], data["project_key"]  # ✅ 3 values
 
 @app.get("/projects")
 async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
