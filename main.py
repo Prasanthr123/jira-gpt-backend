@@ -304,8 +304,9 @@ async def update_comment(issue_key: str, comment_id: str, request: Request, auth
     return {"message": "Comment updated"} if res.status_code == 200 else res.json()
 
 
-def jql_search(jql: str, headers, base_url, source_ticket_key: str = None):
-    res = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": jql, "maxResults": 100})
+def jql_search(jql: str, headers, base_url, project_key=None, source_ticket_key: str = None):
+    full_jql = f'project = "{project_key}" AND {jql}' if project_key else jql
+    res = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": full_jql, "maxResults": 100})
     if res.status_code == 200:
         issues = []
         for i in res.json().get("issues", []):
@@ -332,6 +333,7 @@ def jql_search(jql: str, headers, base_url, source_ticket_key: str = None):
         return issues
     return JSONResponse(status_code=res.status_code, content={"error": res.text})
 
+
 @app.get("/impact/label/{label}")
 async def get_impact_by_label(label: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
@@ -355,9 +357,8 @@ async def get_impact_by_module(keyword: str, request: Request, auth_data=Depends
 
 @app.get("/tickets/sprint/{sprint_id}")
 async def get_tickets_by_sprint(sprint_id: int, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url, _ = auth_data
-    return jql_search(f"sprint = {sprint_id}", headers, base_url)
-
+    headers, base_url, project_key = auth_data
+    return jql_search(f"sprint = {sprint_id}", headers, base_url, project_key=project_key)
 
 @app.get("/tickets/priority/{priority}")
 async def get_tickets_by_priority(priority: str, request: Request, auth_data=Depends(get_auth_headers)):
