@@ -145,11 +145,11 @@ def get_auth_headers(request: Request):
         "Content-Type": "application/json"
     }, data["base_url"]
 
-#@app.get("/projects")
-#async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
-   # headers, base_url = auth_data
-  #  res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
-    #return res.json()
+@app.get("/projects")
+async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
+    headers, base_url = auth_data
+    res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
+    return res.json()
 
 @app.get("/ticket/{issue_key}")
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
@@ -204,11 +204,11 @@ async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
     res = requests.post(f"{base_url}/rest/api/3/issue", headers=headers, json=payload)
     return res.json() if res.status_code != 201 else {"message": "Ticket created"}
 
-*@app.get("/ticket/{issue_key}")
-async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
-    res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
-    return res.json()
+#*@app.get("/ticket/{issue_key}")
+#async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
+    #headers, base_url = auth_data
+   # res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
+    #return res.json()
 
 @app.patch("/ticket/{issue_key}")
 async def update_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
