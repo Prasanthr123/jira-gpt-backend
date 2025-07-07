@@ -186,7 +186,6 @@ async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_a
         ]
     }
 
-
 @app.post("/ticket")
 async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
