@@ -155,36 +155,42 @@ async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
 
-    # Step 1: Get ticket details
+    # Step 1: Get ticket
     issue_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
     if issue_res.status_code != 200:
         return JSONResponse(status_code=issue_res.status_code, content={"error": issue_res.text})
 
-    issue = issue_res.json()
+    try:
+        issue = issue_res.json()
+        fields = issue.get("fields", {})
 
-    # Step 2: Get comments
-    comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
-    comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
+        # Step 2: Get comments
+        comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
+        comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
 
-    # Step 3: Get attachments
-    attachments = issue["fields"].get("attachment", [])
+        # Step 3: Get attachments
+        attachments = fields.get("attachment", [])
 
-    return {
-        "key": issue_key,
-        "summary": issue["fields"].get("summary"),
-        "description": issue["fields"].get("description"),
-        "status": issue["fields"].get("status", {}).get("name"),
-        "labels": issue["fields"].get("labels", []),
-        "environment": issue["fields"].get("environment"),
-        "comments": comments,
-        "attachments": [
-            {
-                "filename": att.get("filename"),
-                "mimeType": att.get("mimeType"),
-                "url": att.get("content")
-            } for att in attachments
-        ]
-    }
+        return {
+            "key": issue_key,
+            "summary": fields.get("summary", "N/A"),
+            "description": fields.get("description", "N/A"),
+            "status": fields.get("status", {}).get("name", "Unknown"),
+            "labels": fields.get("labels", []),
+            "environment": fields.get("environment", "Not specified"),
+            "comments": comments,
+            "attachments": [
+                {
+                    "filename": att.get("filename"),
+                    "mimeType": att.get("mimeType"),
+                    "url": att.get("content")
+                } for att in attachments
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Failed to parse ticket {issue_key}: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Internal server error while parsing ticket {issue_key}"})
 
 @app.post("/ticket")
 async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
