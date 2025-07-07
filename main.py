@@ -69,6 +69,7 @@ RESOURCE_API = "https://api.atlassian.com/oauth/token/accessible-resources"
 SCOPES = ["read:jira-work", "write:jira-work", "read:jira-user"]
 
 @app.get("/oauth/login")
+
 def start_oauth():
     query = {
         "audience": "api.atlassian.com",
@@ -123,7 +124,20 @@ async def oauth_callback(request: Request):
         """,
         status_code=200
     )
-
+def get_auth_headers(request: Request):
+    x_user_id = request.query_params.get("user_id")
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail="Missing user_id. Please log in via /oauth/login.")
+    if x_user_id not in user_tokens:
+        raise HTTPException(status_code=401, detail="Session expired or user not authenticated.")
+    data = user_tokens[x_user_id]
+    if not data.get("project_key"):
+        raise HTTPException(status_code=400, detail="Project key not set. Please call /set-project first.")
+    return {
+        "Authorization": f"Bearer {data['access_token']}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }, data["base_url"], data["project_key"]
 
 @app.get("/projects")
 async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
