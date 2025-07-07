@@ -1,12 +1,11 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 import os, requests, urllib.parse, logging, sys, uuid
 from datetime import datetime
 
 app = FastAPI()
 
-# CORS setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,7 +14,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Human-friendly log formatter
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
@@ -31,7 +29,6 @@ async def user_friendly_logger(request: Request, call_next):
     method = request.method
     timestamp = datetime.utcnow().strftime("%b %d %Y %I:%M:%S %p")
 
-    # Custom action mapping
     action_map = {
         "/oauth/login": "started login",
         "/oauth/callback": "completed login",
@@ -43,7 +40,6 @@ async def user_friendly_logger(request: Request, call_next):
     }
     action = action_map.get(path, f"accessed {path}")
 
-    # Log the incoming request
     logger.info(f"\n📥 REQUEST | [{timestamp}]")
     logger.info(f"User ID: {user_id}")
     logger.info(f"IP Address: {ip}")
@@ -52,22 +48,17 @@ async def user_friendly_logger(request: Request, call_next):
     logger.info(f"Path: {path}")
 
     response: Response = await call_next(request)
-
-    # Log the response status
     logger.info(f"📤 RESPONSE | Status Code: {response.status_code}")
     logger.info("-" * 60)
-
     return response
 
 @app.get("/")
 async def home():
     return {"message": "Welcome to QA GPT backend"}
 
-# OAuth setup
 CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ATLASSIAN_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "").strip()
-
 AUTH_BASE_URL = "https://auth.atlassian.com/authorize"
 TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 USER_API_URL = "https://api.atlassian.com/me"
@@ -94,14 +85,13 @@ async def oauth_callback(request: Request):
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(status_code=400, detail="Missing code")
-    payload = {
+    token_response = requests.post(TOKEN_URL, json={
         "grant_type": "authorization_code",
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
         "code": code,
         "redirect_uri": REDIRECT_URI
-    }
-    token_response = requests.post(TOKEN_URL, json=payload)
+    })
     if token_response.status_code != 200:
         return JSONResponse(status_code=token_response.status_code, content=token_response.json())
     tokens = token_response.json()
@@ -120,15 +110,12 @@ async def oauth_callback(request: Request):
         "base_url": base_url
     }
     logger.info(f"OAuth Success | User: {user_id}")
-    return HTMLResponse(
-        content=f"""
+    return HTMLResponse(content=f"""
         <h2>✅ Jira OAuth Login Successful!</h2>
         <p>You can now return to ChatGPT and continue using the assistant.</p>
         <p><strong>Your Jira ID:</strong> <code>{user_id}</code></p>
         <p>📋 Please copy this ID and paste it into ChatGPT when asked.</p>
-        """,
-        status_code=200
-    )
+    """, status_code=200)
 
 def get_auth_headers(request: Request):
     x_user_id = request.query_params.get("user_id")
@@ -145,43 +132,34 @@ def get_auth_headers(request: Request):
         "Content-Type": "application/json"
     }, data["base_url"], data["project_key"]
 
-@app.get("/projects")
-async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url, _ = auth_data  # ✅ added _
-    res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
-    return res.json()
-
-
 @app.post("/set-project")
 async def set_project(request: Request):
     x_user_id = request.query_params.get("user_id")
     if not x_user_id or x_user_id not in user_tokens:
         raise HTTPException(status_code=401, detail="Unauthorized or session expired")
-
     body = await request.json()
     project_key = body.get("project_key")
     if not project_key:
         raise HTTPException(status_code=400, detail="Missing 'project_key' in body")
-
     user_tokens[x_user_id]["project_key"] = project_key
     return {"message": f"Project key '{project_key}' set successfully"}
 
+@app.get("/projects")
+async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
+    headers, base_url, _ = auth_data
+    res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
+    return res.json()
 
 @app.get("/ticket/{issue_key}")
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
-
     issue_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
     if issue_res.status_code != 200:
         return JSONResponse(status_code=issue_res.status_code, content={"error": issue_res.text})
-
     issue = issue_res.json()
-
     comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
     comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
-
     attachments = issue["fields"].get("attachment", [])
-
     return {
         "key": issue_key,
         "summary": issue["fields"].get("summary"),
@@ -191,21 +169,18 @@ async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_a
         "environment": issue["fields"].get("environment"),
         "comments": comments,
         "attachments": [
-            {
-                "filename": att.get("filename"),
-                "mimeType": att.get("mimeType"),
-                "url": att.get("content")
-            } for att in attachments
+            {"filename": att.get("filename"), "mimeType": att.get("mimeType"), "url": att.get("content")}
+            for att in attachments
         ]
     }
 
 @app.post("/ticket")
 async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url, project_key = auth_data  # ✅ added project_key
+    headers, base_url, project_key = auth_data
     data = await request.json()
     payload = {
         "fields": {
-            "project": {"key": project_key},  # ✅ use set project_key
+            "project": {"key": project_key},
             "summary": data.get("summary"),
             "description": {
                 "type": "doc", "version": 1,
@@ -217,37 +192,21 @@ async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
     res = requests.post(f"{base_url}/rest/api/3/issue", headers=headers, json=payload)
     return res.json() if res.status_code != 201 else {"message": "Ticket created"}
 
-
-
 @app.patch("/ticket/{issue_key}")
 async def update_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url, _ = auth_data  # project_key is not needed here
-
+    headers, base_url, _ = auth_data
     data = await request.json()
     update_fields = {}
-
     if "summary" in data:
         update_fields["summary"] = data["summary"]
-
     if "description" in data:
         update_fields["description"] = {
-            "type": "doc",
-            "version": 1,
-            "content": [
-                {
-                    "type": "paragraph",
-                    "content": [
-                        {"type": "text", "text": data["description"]}
-                    ]
-                }
-            ]
+            "type": "doc", "version": 1,
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data["description"]}]}]
         }
-
     payload = {"fields": update_fields}
     res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers, json=payload)
-
     return {"message": "Updated"} if res.status_code == 204 else res.json()
-
 
 @app.get("/ticket/{issue_key}/comments")
 async def get_comments(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
@@ -255,54 +214,31 @@ async def get_comments(issue_key: str, request: Request, auth_data=Depends(get_a
     res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
     return res.json()
 
-
 @app.post("/ticket/{issue_key}/comments")
 async def add_comment(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
     data = await request.json()
-
     payload = {
         "body": {
-            "type": "doc",
-            "version": 1,
-            "content": [
-                {
-                    "type": "paragraph",
-                    "content": [
-                        {"type": "text", "text": data.get("body", "")}
-                    ]
-                }
-            ]
+            "type": "doc", "version": 1,
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("body", "")}]}]
         }
     }
-
     res = requests.post(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers, json=payload)
     return res.json()
-
 
 @app.patch("/ticket/{issue_key}/comments/{comment_id}")
 async def update_comment(issue_key: str, comment_id: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
     data = await request.json()
-
     payload = {
         "body": {
-            "type": "doc",
-            "version": 1,
-            "content": [
-                {
-                    "type": "paragraph",
-                    "content": [
-                        {"type": "text", "text": data.get("body", "")}
-                    ]
-                }
-            ]
+            "type": "doc", "version": 1,
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("body", "")}]}]
         }
     }
-
     res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}/comment/{comment_id}", headers=headers, json=payload)
     return {"message": "Comment updated"} if res.status_code == 200 else res.json()
-
 
 def jql_search(jql: str, headers, base_url, project_key=None, source_ticket_key: str = None):
     full_jql = f'project = "{project_key}" AND {jql}' if project_key else jql
@@ -325,35 +261,27 @@ def jql_search(jql: str, headers, base_url, project_key=None, source_ticket_key:
                 if not any(word in text.lower() for word in logic_keywords):
                     logger.info(f"Skipping Epic/Parent ticket {key} without logic keywords.")
                     continue
-            issues.append({
-                "key": key,
-                "summary": i["fields"]["summary"],
-                "description": description
-            })
+            issues.append({"key": key, "summary": i["fields"]["summary"], "description": description})
         return issues
     return JSONResponse(status_code=res.status_code, content={"error": res.text})
 
-
 @app.get("/impact/label/{label}")
 async def get_impact_by_label(label: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url, _ = auth_data
+    headers, base_url, project_key = auth_data
     source_ticket_key = request.query_params.get("source_ticket")
-    return jql_search(f'labels = "{label}"', headers, base_url, source_ticket_key)
-
+    return jql_search(f'labels = "{label}"', headers, base_url, project_key, source_ticket_key)
 
 @app.get("/impact/component/{component}")
 async def get_impact_by_component(component: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url, _ = auth_data
+    headers, base_url, project_key = auth_data
     source_ticket_key = request.query_params.get("source_ticket")
-    return jql_search(f'component = "{component}"', headers, base_url, source_ticket_key)
-
+    return jql_search(f'component = "{component}"', headers, base_url, project_key, source_ticket_key)
 
 @app.get("/impact/module/{keyword}")
 async def get_impact_by_module(keyword: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url, _ = auth_data
+    headers, base_url, project_key = auth_data
     source_ticket_key = request.query_params.get("source_ticket")
-    return jql_search(f'summary ~ "{keyword}"', headers, base_url, source_ticket_key)
-
+    return jql_search(f'summary ~ "{keyword}"', headers, base_url, project_key, source_ticket_key)
 
 @app.get("/tickets/sprint/{sprint_id}")
 async def get_tickets_by_sprint(sprint_id: int, request: Request, auth_data=Depends(get_auth_headers)):
@@ -362,5 +290,5 @@ async def get_tickets_by_sprint(sprint_id: int, request: Request, auth_data=Depe
 
 @app.get("/tickets/priority/{priority}")
 async def get_tickets_by_priority(priority: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url, _ = auth_data
-    return jql_search(f'priority = "{priority}"', headers, base_url)
+    headers, base_url, project_key = auth_data
+    return jql_search(f'priority = "{priority}"', headers, base_url, project_key=project_key)
