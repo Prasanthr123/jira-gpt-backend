@@ -153,13 +153,26 @@ async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
 @app.get("/ticket/{issue_key}")
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
+    user_id = request.query_params.get("user_id")
+
     issue_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
     if issue_res.status_code != 200:
         return JSONResponse(status_code=issue_res.status_code, content={"error": issue_res.text})
     issue = issue_res.json()
+
     comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
     comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
+
     attachments = issue["fields"].get("attachment", [])
+    processed_attachments = []
+    for att in attachments:
+        proxy_url = f"https://jira-gpt-backend.onrender.com/attachment/{att['id']}?user_id={user_id}"
+        processed_attachments.append({
+            "filename": att.get("filename"),
+            "mimeType": att.get("mimeType"),
+            "url": proxy_url
+        })
+
     return {
         "key": issue_key,
         "summary": issue["fields"].get("summary"),
@@ -168,13 +181,9 @@ async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_a
         "labels": issue["fields"].get("labels", []),
         "environment": issue["fields"].get("environment"),
         "comments": comments,
-        "attachments": [
-            {"filename": att.get("filename"), "mimeType": att.get("mimeType"), "url": att.get("content")}
-            for att in attachments
-        ]
+        "attachments": processed_attachments
     }
 
-from fastapi import Response
 
 @app.get("/attachment/{attachment_id}")
 async def proxy_attachment(attachment_id: str, request: Request, auth_data=Depends(get_auth_headers)):
