@@ -10,16 +10,13 @@ from io import BytesIO, StringIO
 # Third-party
 import requests
 from requests.exceptions import RequestException
-from fastapi import FastAPI, Request, HTTPException, Depends, Query
+from fastapi import FastAPI, Request, HTTPException, Depends, 
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from docx import Document
 import csv
 
 
-
-# ✅ Step 1: Add this global dictionary to store each user's last GPT output
-user_outputs = {}
 
 app = FastAPI()
 
@@ -408,42 +405,15 @@ async def get_tickets_by_priority(priority: str, request: Request, auth_data=Dep
     headers, base_url, project_key = auth_data
     return jql_search(f'priority = "{priority}"', headers, base_url, project_key=project_key)
 
-# output
-@app.post("/save-output")
-async def save_output(request: Request, auth_data=Depends(get_auth_headers)):
-    headers, _, _ = auth_data
-    user_id = request.query_params.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=400, detail="Missing user_id for key generation")
 
+@app.post("/generate-docx")
+async def generate_docx(request: Request):
     data = await request.json()
-    output = data.get("output")
-    project = data.get("project", "default")
-    output_type = data.get("type", "generic")
-
-    if not output:
+    text = data.get("output", "")
+    if not text:
         return JSONResponse(status_code=400, content={"error": "Missing 'output' field."})
 
-    key = f"{user_id}::{project}::{output_type}"
-    user_outputs[key] = output
-
-    return {"message": f"Output saved for {project} – {output_type}"}
-
-
-
-# export docx
-@app.get("/export/docx")
-async def export_docx(
-    user_id: str = Query(...),
-    project: str = Query(...),
-    type: str = Query(...)
-):
     try:
-        key = f"{user_id}::{project}::{type}"
-        if key not in user_outputs:
-            return JSONResponse(status_code=404, content={"error": "No output found."})
-
-        text = user_outputs[key]
         doc = Document()
         for line in text.split('\n'):
             doc.add_paragraph(line)
@@ -458,30 +428,21 @@ async def export_docx(
             headers={"Content-Disposition": "attachment; filename=test-output.docx"}
         )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Failed to export DOCX: {str(e)}"})
+        return JSONResponse(status_code=500, content={"error": f"Failed to generate DOCX: {str(e)}"})
 
-#export csv
-@app.get("/export/csv")
-async def export_csv(
-    user_id: str = Query(...),
-    project: str = Query(...),
-    type: str = Query(...)
-):
+
+@app.post("/generate-csv")
+async def generate_csv(request: Request):
+    data = await request.json()
+    text = data.get("output", "")
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "Missing 'output' field."})
+
     try:
-        key = f"{user_id}::{project}::{type}"
-        if key not in user_outputs:
-            return JSONResponse(status_code=404, content={"error": "No output found."})
-
-        text = user_outputs[key]
-        lines = text.split('\n')
-
-        import io
-        buffer = io.StringIO()
+        buffer = StringIO()
         writer = csv.writer(buffer)
-
-        for line in lines:
+        for line in text.split('\n'):
             writer.writerow([line])
-
         buffer.seek(0)
         byte_stream = BytesIO(buffer.getvalue().encode())
 
@@ -491,7 +452,8 @@ async def export_csv(
             headers={"Content-Disposition": "attachment; filename=test-output.csv"}
         )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Failed to export CSV: {str(e)}"})
+        return JSONResponse(status_code=500, content={"error": f"Failed to generate CSV: {str(e)}"})
+
 
 # App Health
 @app.get("/health")
