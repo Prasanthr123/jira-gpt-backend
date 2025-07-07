@@ -151,6 +151,21 @@ async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
     res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
     return res.json()
 
+@app.post("/set-project")
+async def set_project(request: Request):
+    x_user_id = request.query_params.get("user_id")
+    if not x_user_id or x_user_id not in user_tokens:
+        raise HTTPException(status_code=401, detail="Unauthorized or session expired")
+    
+    body = await request.json()
+    project_key = body.get("project_key")
+    if not project_key:
+        raise HTTPException(status_code=400, detail="Missing 'project_key' in body")
+
+    user_tokens[x_user_id]["project_key"] = project_key
+    return {"message": f"Project key '{project_key}' set successfully"}
+
+
 @app.get("/ticket/{issue_key}")
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
