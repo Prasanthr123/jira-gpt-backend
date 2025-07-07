@@ -174,6 +174,33 @@ async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_a
         ]
     }
 
+from fastapi import Response
+
+@app.get("/attachment/{attachment_id}")
+async def proxy_attachment(attachment_id: str, request: Request, auth_data=Depends(get_auth_headers)):
+    headers, base_url, _ = auth_data
+
+    # Step 1: Get attachment metadata
+    meta_res = requests.get(f"{base_url}/rest/api/3/attachment/{attachment_id}", headers=headers)
+    if meta_res.status_code != 200:
+        return JSONResponse(status_code=meta_res.status_code, content={"error": meta_res.text})
+
+    attachment = meta_res.json()
+    content_url = attachment.get("content")
+    filename = attachment.get("filename", f"attachment_{attachment_id}")
+
+    # Step 2: Get the actual file content
+    content_res = requests.get(content_url, headers=headers)
+    if content_res.status_code != 200:
+        return JSONResponse(status_code=content_res.status_code, content={"error": "Failed to fetch attachment content"})
+
+    return Response(
+        content=content_res.content,
+        media_type=attachment.get("mimeType", "application/octet-stream"),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
 @app.post("/ticket")
 async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, project_key = auth_data
