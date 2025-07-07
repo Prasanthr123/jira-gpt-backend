@@ -1,8 +1,14 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, Response
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os, requests, urllib.parse, logging, sys, uuid
 from datetime import datetime
+from io import BytesIO
+from docx import Document
+import csv
+
+# ✅ Step 1: Add this global dictionary to store each user's last GPT output
+user_outputs = {}
 
 app = FastAPI()
 
@@ -328,3 +334,72 @@ async def get_tickets_by_sprint(sprint_id: int, request: Request, auth_data=Depe
 async def get_tickets_by_priority(priority: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, project_key = auth_data
     return jql_search(f'priority = "{priority}"', headers, base_url, project_key=project_key)
+    
+@app.post("/save-output")
+async def save_output(request: Request, user_id: str = Query(...)):
+    data = await request.json()
+    output = data.get("output")
+    project = data.get("project", "default")
+    output_type = data.get("type", "generic")
+
+    key = f"{user_id}::{project}::{output_type}"
+
+    if not output:
+        return JSONResponse(status_code=400, content={"error": "Missing 'output' field."})
+
+    user_outputs[key] = output
+    return {"message": f"Output saved for {project} – {output_type}"}
+
+# export docx
+@app.get("/export/docx")
+async def export_docx(
+    user_id: str = Query(...),
+    project: str = Query(...),
+    type: str = Query(...)
+):
+    key = f"{user_id}::{project}::{type}"
+    if key not in user_outputs:
+        return JSONResponse(status_code=404, content={"error": "No output found."})
+
+    text = user_outputs[key]
+    doc = Document()
+    for line in text.split('\n'):
+        doc.add_paragraph(line)
+
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": "attachment; filename=test-output.docx"}
+    )
+#export csv
+@app.get("/export/csv")
+async def export_csv(
+    user_id: str = Query(...),
+    project: str = Query(...),
+    type: str = Query(...)
+):
+    key = f"{user_id}::{project}::{type}"
+    if key not in user_outputs:
+        return JSONResponse(status_code=404, content={"error": "No output found."})
+
+    text = user_outputs[key]
+    lines = text.split('\n')
+
+    buffer = BytesIO()
+    writer = csv.writer(buffer)
+
+    for line in lines:
+        writer.writerow([line])
+
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=test-output.csv"}
+    )
+
