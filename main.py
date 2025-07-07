@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-import os, requests, urllib.parse, logging, sys, uuid
+import os, requests, urllib.parse, logging, sys, uuid, docx
 from datetime import datetime
 from io import BytesIO
 from docx import Document
