@@ -1,11 +1,22 @@
-from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-import os, requests, urllib.parse, logging, sys, uuid, docx
+# Standard Library
+import os
+import sys
+import logging
+import uuid
+import urllib.parse
 from datetime import datetime
-from io import BytesIO
+from io import BytesIO, StringIO
+
+# Third-party
+import requests
+from requests.exceptions import RequestException
+from fastapi import FastAPI, Request, HTTPException, Depends, Query
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, StreamingResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
 from docx import Document
 import csv
+
+
 
 # ✅ Step 1: Add this global dictionary to store each user's last GPT output
 user_outputs = {}
@@ -42,6 +53,9 @@ async def user_friendly_logger(request: Request, call_next):
         "/report_defect": "reported a defect",
         "/impact_analysis": "ran impact analysis",
         "/ticket": "created a Jira ticket",
+        "/save-output": "saved generated output",
+        "/export/docx": "exported DOCX file",
+        "/export/csv": "exported CSV file",
         "/": "pinged home"
     }
     action = action_map.get(path, f"accessed {path}")
@@ -150,72 +164,88 @@ async def set_project(request: Request):
     user_tokens[x_user_id]["project_key"] = project_key
     return {"message": f"Project key '{project_key}' set successfully"}
 
+# Get Projects
 @app.get("/projects")
 async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
-    res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
-    return res.json()
+    try:
+        res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
+        res.raise_for_status()  # Raise error for 4xx/5xx responses
+        return res.json()
+    except RequestException as e:
+        # Handles network issues, timeouts, invalid responses
+        return JSONResponse(status_code=500, content={"error": f"Jira API request failed: {str(e)}"})
+    except ValueError:
+        # Handles JSON decode errors
+        return JSONResponse(status_code=500, content={"error": "Invalid JSON response from Jira"})
 
+# Get Tickets
 @app.get("/ticket/{issue_key}")
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
     user_id = request.query_params.get("user_id")
 
-    issue_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
-    if issue_res.status_code != 200:
-        return JSONResponse(status_code=issue_res.status_code, content={"error": issue_res.text})
-    issue = issue_res.json()
+    try:
+        issue_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
+        issue_res.raise_for_status()
+        issue = issue_res.json()
 
-    comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
-    comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
+        comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
+        comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
 
-    attachments = issue["fields"].get("attachment", [])
-    processed_attachments = []
-    for att in attachments:
-        proxy_url = f"https://jira-gpt-backend.onrender.com/attachment/{att['id']}?user_id={user_id}"
-        processed_attachments.append({
-            "filename": att.get("filename"),
-            "mimeType": att.get("mimeType"),
-            "url": proxy_url
-        })
+        attachments = issue["fields"].get("attachment", [])
+        processed_attachments = []
+        for att in attachments:
+            proxy_url = f"https://jira-gpt-backend.onrender.com/attachment/{att['id']}?user_id={user_id}"
+            processed_attachments.append({
+                "filename": att.get("filename"),
+                "mimeType": att.get("mimeType"),
+                "url": proxy_url
+            })
 
-    return {
-        "key": issue_key,
-        "summary": issue["fields"].get("summary"),
-        "description": issue["fields"].get("description"),
-        "status": issue["fields"].get("status", {}).get("name"),
-        "labels": issue["fields"].get("labels", []),
-        "environment": issue["fields"].get("environment"),
-        "comments": comments,
-        "attachments": processed_attachments
-    }
+        return {
+            "key": issue_key,
+            "summary": issue["fields"].get("summary"),
+            "description": issue["fields"].get("description"),
+            "status": issue["fields"].get("status", {}).get("name"),
+            "labels": issue["fields"].get("labels", []),
+            "environment": issue["fields"].get("environment"),
+            "comments": comments,
+            "attachments": processed_attachments
+        }
 
+    except requests.exceptions.RequestException as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to fetch issue {issue_key}: {str(e)}"})
+    except ValueError:
+        return JSONResponse(status_code=500, content={"error": "Invalid JSON from Jira"})
 
+# Get attachements
 @app.get("/attachment/{attachment_id}")
 async def proxy_attachment(attachment_id: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
+    try:
+        meta_res = requests.get(f"{base_url}/rest/api/3/attachment/{attachment_id}", headers=headers)
+        meta_res.raise_for_status()
+        attachment = meta_res.json()
 
-    # Step 1: Get attachment metadata
-    meta_res = requests.get(f"{base_url}/rest/api/3/attachment/{attachment_id}", headers=headers)
-    if meta_res.status_code != 200:
-        return JSONResponse(status_code=meta_res.status_code, content={"error": meta_res.text})
+        content_url = attachment.get("content")
+        filename = attachment.get("filename", f"attachment_{attachment_id}")
 
-    attachment = meta_res.json()
-    content_url = attachment.get("content")
-    filename = attachment.get("filename", f"attachment_{attachment_id}")
+        content_res = requests.get(content_url, headers=headers)
+        content_res.raise_for_status()
 
-    # Step 2: Get the actual file content
-    content_res = requests.get(content_url, headers=headers)
-    if content_res.status_code != 200:
-        return JSONResponse(status_code=content_res.status_code, content={"error": "Failed to fetch attachment content"})
+        return Response(
+            content=content_res.content,
+            media_type=attachment.get("mimeType", "application/octet-stream"),
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
 
-    return Response(
-        content=content_res.content,
-        media_type=attachment.get("mimeType", "application/octet-stream"),
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
+    except requests.exceptions.RequestException as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to fetch attachment: {str(e)}"})
+    except ValueError:
+        return JSONResponse(status_code=500, content={"error": "Invalid attachment response"})
 
-
+# Create Tickets
 @app.post("/ticket")
 async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, project_key = auth_data
@@ -231,31 +261,56 @@ async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
             "issuetype": {"name": data.get("issue_type", "Bug")}
         }
     }
-    res = requests.post(f"{base_url}/rest/api/3/issue", headers=headers, json=payload)
-    return res.json() if res.status_code != 201 else {"message": "Ticket created"}
+    try:
+        res = requests.post(f"{base_url}/rest/api/3/issue", headers=headers, json=payload)
+        res.raise_for_status()
+        return {"message": "Ticket created", "key": res.json().get("key")}
+    except requests.exceptions.RequestException as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to create ticket: {str(e)}"})
+    except ValueError:
+        return JSONResponse(status_code=500, content={"error": "Invalid response from Jira"})
 
+# Update Tickets
 @app.patch("/ticket/{issue_key}")
 async def update_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
-    data = await request.json()
-    update_fields = {}
-    if "summary" in data:
-        update_fields["summary"] = data["summary"]
-    if "description" in data:
-        update_fields["description"] = {
-            "type": "doc", "version": 1,
-            "content": [{"type": "paragraph", "content": [{"type": "text", "text": data["description"]}]}]
-        }
-    payload = {"fields": update_fields}
-    res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers, json=payload)
-    return {"message": "Updated"} if res.status_code == 204 else res.json()
+    try:
+        data = await request.json()
+        update_fields = {}
 
+        if "summary" in data:
+            update_fields["summary"] = data["summary"]
+        if "description" in data:
+            update_fields["description"] = {
+                "type": "doc", "version": 1,
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": data["description"]}]}]
+            }
+
+        payload = {"fields": update_fields}
+        res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers, json=payload)
+        res.raise_for_status()
+
+        return {"message": "Ticket updated successfully"} if res.status_code == 204 else res.json()
+
+    except RequestException as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to update ticket {issue_key}: {str(e)}"})
+    except ValueError:
+        return JSONResponse(status_code=500, content={"error": "Invalid response format from Jira"})
+
+# Get Ticket comments
 @app.get("/ticket/{issue_key}/comments")
 async def get_comments(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
-    res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
-    return res.json()
+    try:
+        res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to fetch comments: {str(e)}"})
+    except ValueError:
+        return JSONResponse(status_code=500, content={"error": "Invalid JSON from Jira"})
 
+# Add comments in a Ticket
 @app.post("/ticket/{issue_key}/comments")
 async def add_comment(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
@@ -266,9 +321,16 @@ async def add_comment(issue_key: str, request: Request, auth_data=Depends(get_au
             "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("body", "")}]}]
         }
     }
-    res = requests.post(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers, json=payload)
-    return res.json()
+    try:
+        res = requests.post(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers, json=payload)
+        res.raise_for_status()
+        return res.json()
+    except requests.exceptions.RequestException as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to add comment: {str(e)}"})
+    except ValueError:
+        return JSONResponse(status_code=500, content={"error": "Invalid JSON response from Jira"})
 
+# Update Ticket Comments
 @app.patch("/ticket/{issue_key}/comments/{comment_id}")
 async def update_comment(issue_key: str, comment_id: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
@@ -279,33 +341,44 @@ async def update_comment(issue_key: str, comment_id: str, request: Request, auth
             "content": [{"type": "paragraph", "content": [{"type": "text", "text": data.get("body", "")}]}]
         }
     }
-    res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}/comment/{comment_id}", headers=headers, json=payload)
-    return {"message": "Comment updated"} if res.status_code == 200 else res.json()
+    try:
+        res = requests.put(f"{base_url}/rest/api/3/issue/{issue_key}/comment/{comment_id}", headers=headers, json=payload)
+        res.raise_for_status()
+        return {"message": "Comment updated"}
+    except requests.exceptions.RequestException as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to update comment: {str(e)}"})
 
+# Querry filetrs for tickets
 def jql_search(jql: str, headers, base_url, project_key=None, source_ticket_key: str = None):
-    full_jql = f'project = "{project_key}" AND {jql}' if project_key else jql
-    res = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": full_jql, "maxResults": 100})
-    if res.status_code == 200:
+    try:
+        full_jql = f'project = "{project_key}" AND {jql}' if project_key else jql
+        res = requests.get(f"{base_url}/rest/api/3/search", headers=headers, params={"jql": full_jql, "maxResults": 100})
+        res.raise_for_status()
+
         issues = []
         for i in res.json().get("issues", []):
             key = i["key"]
             if source_ticket_key and key == source_ticket_key:
-                logger.info(f"Skipping source ticket {key} from impact analysis.")
                 continue
             issue_type = i["fields"].get("issuetype", {}).get("name", "").lower()
             description = i["fields"].get("description", "")
+
+            # Optional filter logic
             if issue_type in ["epic", "parent"]:
                 if not description:
-                    logger.info(f"Skipping Epic/Parent ticket {key} with no description.")
                     continue
                 text = description if isinstance(description, str) else str(description)
                 logic_keywords = ["verify", "check", "validate", "flow", "test", "should"]
                 if not any(word in text.lower() for word in logic_keywords):
-                    logger.info(f"Skipping Epic/Parent ticket {key} without logic keywords.")
                     continue
+
             issues.append({"key": key, "summary": i["fields"]["summary"], "description": description})
         return issues
-    return JSONResponse(status_code=res.status_code, content={"error": res.text})
+
+    except requests.exceptions.RequestException as e:
+        return JSONResponse(status_code=500, content={"error": f"Jira JQL search failed: {str(e)}"})
+    except ValueError:
+        return JSONResponse(status_code=500, content={"error": "Invalid JSON returned by Jira"})
 
 @app.get("/impact/label/{label}")
 async def get_impact_by_label(label: str, request: Request, auth_data=Depends(get_auth_headers)):
@@ -334,21 +407,29 @@ async def get_tickets_by_sprint(sprint_id: int, request: Request, auth_data=Depe
 async def get_tickets_by_priority(priority: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, project_key = auth_data
     return jql_search(f'priority = "{priority}"', headers, base_url, project_key=project_key)
-    
+
+# output
 @app.post("/save-output")
-async def save_output(request: Request, user_id: str = Query(...)):
+async def save_output(request: Request, auth_data=Depends(get_auth_headers)):
+    headers, _, _ = auth_data
+    user_id = request.query_params.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user_id for key generation")
+
     data = await request.json()
     output = data.get("output")
     project = data.get("project", "default")
     output_type = data.get("type", "generic")
 
-    key = f"{user_id}::{project}::{output_type}"
-
     if not output:
         return JSONResponse(status_code=400, content={"error": "Missing 'output' field."})
 
+    key = f"{user_id}::{project}::{output_type}"
     user_outputs[key] = output
+
     return {"message": f"Output saved for {project} – {output_type}"}
+
+
 
 # export docx
 @app.get("/export/docx")
@@ -357,24 +438,28 @@ async def export_docx(
     project: str = Query(...),
     type: str = Query(...)
 ):
-    key = f"{user_id}::{project}::{type}"
-    if key not in user_outputs:
-        return JSONResponse(status_code=404, content={"error": "No output found."})
+    try:
+        key = f"{user_id}::{project}::{type}"
+        if key not in user_outputs:
+            return JSONResponse(status_code=404, content={"error": "No output found."})
 
-    text = user_outputs[key]
-    doc = Document()
-    for line in text.split('\n'):
-        doc.add_paragraph(line)
+        text = user_outputs[key]
+        doc = Document()
+        for line in text.split('\n'):
+            doc.add_paragraph(line)
 
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
 
-    return StreamingResponse(
-        buffer,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": "attachment; filename=test-output.docx"}
-    )
+        return StreamingResponse(
+            buffer,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": "attachment; filename=test-output.docx"}
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to export DOCX: {str(e)}"})
+
 #export csv
 @app.get("/export/csv")
 async def export_csv(
@@ -382,24 +467,33 @@ async def export_csv(
     project: str = Query(...),
     type: str = Query(...)
 ):
-    key = f"{user_id}::{project}::{type}"
-    if key not in user_outputs:
-        return JSONResponse(status_code=404, content={"error": "No output found."})
+    try:
+        key = f"{user_id}::{project}::{type}"
+        if key not in user_outputs:
+            return JSONResponse(status_code=404, content={"error": "No output found."})
 
-    text = user_outputs[key]
-    lines = text.split('\n')
+        text = user_outputs[key]
+        lines = text.split('\n')
 
-    buffer = BytesIO()
-    writer = csv.writer(buffer)
+        import io
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
 
-    for line in lines:
-        writer.writerow([line])
+        for line in lines:
+            writer.writerow([line])
 
-    buffer.seek(0)
+        buffer.seek(0)
+        byte_stream = BytesIO(buffer.getvalue().encode())
 
-    return StreamingResponse(
-        buffer,
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=test-output.csv"}
-    )
+        return StreamingResponse(
+            byte_stream,
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=test-output.csv"}
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to export CSV: {str(e)}"})
 
+# App Health
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
