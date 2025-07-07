@@ -155,7 +155,6 @@ async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
 
-    # Step 1: Get ticket
     issue_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
     if issue_res.status_code != 200:
         return JSONResponse(status_code=issue_res.status_code, content={"error": issue_res.text})
@@ -164,20 +163,24 @@ async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_a
         issue = issue_res.json()
         fields = issue.get("fields", {})
 
-        # Step 2: Get comments
+        # Safe parsing
+        summary = fields.get("summary", "N/A")
+        description = fields.get("description", "N/A")
+        status = fields.get("status", {}).get("name", "Unknown")
+        labels = fields.get("labels", [])
+        environment = fields.get("environment", "Not specified")
+        attachments = fields.get("attachment", [])
+
         comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
         comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
 
-        # Step 3: Get attachments
-        attachments = fields.get("attachment", [])
-
         return {
             "key": issue_key,
-            "summary": fields.get("summary", "N/A"),
-            "description": fields.get("description", "N/A"),
-            "status": fields.get("status", {}).get("name", "Unknown"),
-            "labels": fields.get("labels", []),
-            "environment": fields.get("environment", "Not specified"),
+            "summary": summary,
+            "description": description,
+            "status": status,
+            "labels": labels,
+            "environment": environment,
             "comments": comments,
             "attachments": [
                 {
@@ -190,7 +193,7 @@ async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_a
 
     except Exception as e:
         logger.error(f"❌ Failed to parse ticket {issue_key}: {e}")
-        return JSONResponse(status_code=500, content={"error": f"Internal server error while parsing ticket {issue_key}"})
+        return JSONResponse(status_code=500, content={"error": f"Unexpected format in ticket {issue_key}", "details": str(e)})
 
 @app.post("/ticket")
 async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
