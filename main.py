@@ -10,7 +10,7 @@ from io import BytesIO, StringIO
 # Third-party
 import requests
 from requests.exceptions import RequestException
-from fastapi import FastAPI, Request, HTTPException, Depends, 
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from docx import Document
