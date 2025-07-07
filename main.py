@@ -145,11 +145,47 @@ def get_auth_headers(request: Request):
         "Content-Type": "application/json"
     }, data["base_url"]
 
-@app.get("/projects")
-async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url = auth_data
-    res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
-    return res.json()
+#@app.get("/projects")
+#async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
+   # headers, base_url = auth_data
+  #  res = requests.get(f"{base_url}/rest/api/3/project", headers=headers)
+    #return res.json()
+
+@app.get("/ticket/{issue_key}")
+async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
+    headers, base_url, _ = auth_data
+
+    # Step 1: Get ticket details
+    issue_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
+    if issue_res.status_code != 200:
+        return JSONResponse(status_code=issue_res.status_code, content={"error": issue_res.text})
+
+    issue = issue_res.json()
+
+    # Step 2: Get comments
+    comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
+    comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
+
+    # Step 3: Get attachments
+    attachments = issue["fields"].get("attachment", [])
+
+    return {
+        "key": issue_key,
+        "summary": issue["fields"].get("summary"),
+        "description": issue["fields"].get("description"),
+        "status": issue["fields"].get("status", {}).get("name"),
+        "labels": issue["fields"].get("labels", []),
+        "environment": issue["fields"].get("environment"),
+        "comments": comments,
+        "attachments": [
+            {
+                "filename": att.get("filename"),
+                "mimeType": att.get("mimeType"),
+                "url": att.get("content")
+            } for att in attachments
+        ]
+    }
+
 
 @app.post("/ticket")
 async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
@@ -169,7 +205,7 @@ async def create_ticket(request: Request, auth_data=Depends(get_auth_headers)):
     res = requests.post(f"{base_url}/rest/api/3/issue", headers=headers, json=payload)
     return res.json() if res.status_code != 201 else {"message": "Ticket created"}
 
-@app.get("/ticket/{issue_key}")
+*@app.get("/ticket/{issue_key}")
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url = auth_data
     res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
