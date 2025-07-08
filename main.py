@@ -8,12 +8,7 @@ import logging
 from datetime import datetime
 from io import BytesIO
 
-# ✅ Document Processing
-from PyPDF2 import PdfReader
-from docx import Document
-import openpyxl
-
-# ✅ Third-party Libraries
+# ✅ Third-Party Libraries
 import requests
 from requests.exceptions import RequestException
 from fastapi import FastAPI, Request, HTTPException, Depends
@@ -25,6 +20,9 @@ from fastapi.responses import (
     Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
+import openpyxl
+from PyPDF2 import PdfReader
+from docx import Document
 
 
 
