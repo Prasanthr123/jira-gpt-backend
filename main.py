@@ -5,6 +5,7 @@ import csv
 import uuid
 import tempfile
 import logging
+import urllib.parse
 from datetime import datetime
 from io import BytesIO
 
