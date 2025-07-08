@@ -6,5 +6,4 @@ PyPDF2
 openpyxl
 pandas
 pillow
-pytesseract
 pdf2image
