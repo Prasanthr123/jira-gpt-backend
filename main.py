@@ -1,20 +1,31 @@
-# Standard Library
+# ✅ Standard Library
 import os
 import sys
-import logging
+import csv
 import uuid
-import urllib.parse
+import tempfile
+import logging
 from datetime import datetime
-from io import BytesIO, StringIO
+from io import BytesIO
 
+# ✅ Document Processing
+from PyPDF2 import PdfReader
+from docx import Document
+import openpyxl
 
-# Third-party
+# ✅ Third-party Libraries
 import requests
 from requests.exceptions import RequestException
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, StreamingResponse, Response
+from fastapi.responses import (
+    RedirectResponse,
+    JSONResponse,
+    HTMLResponse,
+    StreamingResponse,
+    Response,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from docx import Document
+
 
 
 
@@ -180,67 +191,83 @@ async def get_projects(request: Request, auth_data=Depends(get_auth_headers)):
 @app.get("/ticket/{issue_key}")
 async def fetch_ticket(issue_key: str, request: Request, auth_data=Depends(get_auth_headers)):
     headers, base_url, _ = auth_data
-    user_id = request.query_params.get("user_id")
 
-    try:
-        issue_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}", headers=headers)
-        issue_res.raise_for_status()
-        issue = issue_res.json()
+    # Get ticket info
+    issue_url = f"{base_url}/rest/api/3/issue/{issue_key}"
+    issue_res = requests.get(issue_url, headers=headers)
+    if issue_res.status_code != 200:
+        return JSONResponse(status_code=issue_res.status_code, content={"error": issue_res.text})
 
-        comments_res = requests.get(f"{base_url}/rest/api/3/issue/{issue_key}/comment", headers=headers)
-        comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
+    issue = issue_res.json()
+    description = issue["fields"].get("description", "")
+    summary = issue["fields"].get("summary", "")
 
-        attachments = issue["fields"].get("attachment", [])
-        processed_attachments = []
-        for att in attachments:
-            proxy_url = f"https://jira-gpt-backend.onrender.com/attachment/{att['id']}?user_id={user_id}"
-            processed_attachments.append({
-                "filename": att.get("filename"),
-                "mimeType": att.get("mimeType"),
-                "url": proxy_url
-            })
+    # Get comments
+    comments_url = f"{issue_url}/comment"
+    comments_res = requests.get(comments_url, headers=headers)
+    comments = comments_res.json().get("comments", []) if comments_res.status_code == 200 else []
 
-        return {
-            "key": issue_key,
-            "summary": issue["fields"].get("summary"),
-            "description": issue["fields"].get("description"),
-            "status": issue["fields"].get("status", {}).get("name"),
-            "labels": issue["fields"].get("labels", []),
-            "environment": issue["fields"].get("environment"),
-            "comments": comments,
-            "attachments": processed_attachments
-        }
+    # Get attachments
+    attachments = []
+    for att in issue["fields"].get("attachment", []):
+        filename = att.get("filename", "")
+        content_url = att.get("content")
+        if content_url:
+            file_res = requests.get(content_url, headers=headers)
+            if file_res.status_code == 200:
+                text = extract_text_from_attachment(filename, file_res.content)
+                attachments.append({
+                    "filename": filename,
+                    "content": text
+                })
 
-    except requests.exceptions.RequestException as e:
-        return JSONResponse(status_code=500, content={"error": f"Failed to fetch issue {issue_key}: {str(e)}"})
-    except ValueError:
-        return JSONResponse(status_code=500, content={"error": "Invalid JSON from Jira"})
+    return {
+        "key": issue_key,
+        "summary": summary,
+        "description": description,
+        "comments": comments,
+        "attachments": attachments
+    }
+
 
 # Get attachements
-@app.get("/attachment/{attachment_id}")
-async def proxy_attachment(attachment_id: str, request: Request, auth_data=Depends(get_auth_headers)):
-    headers, base_url, _ = auth_data
+def extract_text_from_attachment(filename, file_bytes):
+    ext = os.path.splitext(filename)[-1].lower()
+
     try:
-        meta_res = requests.get(f"{base_url}/rest/api/3/attachment/{attachment_id}", headers=headers)
-        meta_res.raise_for_status()
-        attachment = meta_res.json()
+        if ext == ".txt":
+            return file_bytes.decode("utf-8", errors="ignore")
 
-        content_url = attachment.get("content")
-        filename = attachment.get("filename", f"attachment_{attachment_id}")
+        elif ext == ".pdf":
+            reader = PdfReader(BytesIO(file_bytes))
+            return "\n".join(page.extract_text() or "" for page in reader.pages)
 
-        content_res = requests.get(content_url, headers=headers)
-        content_res.raise_for_status()
+        elif ext == ".docx":
+            doc = Document(BytesIO(file_bytes))
+            return "\n".join(p.text for p in doc.paragraphs)
 
-        return Response(
-            content=content_res.content,
-            media_type=attachment.get("mimeType", "application/octet-stream"),
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
+        elif ext == ".csv":
+            decoded = file_bytes.decode("utf-8", errors="ignore")
+            lines = list(csv.reader(decoded.splitlines()))
+            return "\n".join([", ".join(row) for row in lines])
 
-    except requests.exceptions.RequestException as e:
-        return JSONResponse(status_code=500, content={"error": f"Failed to fetch attachment: {str(e)}"})
-    except ValueError:
-        return JSONResponse(status_code=500, content={"error": "Invalid attachment response"})
+        elif ext == ".xlsx":
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                tmp.write(file_bytes)
+                tmp.flush()
+                wb = openpyxl.load_workbook(tmp.name)
+                content = []
+                for sheet in wb.worksheets:
+                    for row in sheet.iter_rows(values_only=True):
+                        content.append(", ".join([str(cell) if cell is not None else "" for cell in row]))
+                os.unlink(tmp.name)
+                return "\n".join(content)
+
+        else:
+            return f"[Unsupported file type: {ext}]"
+
+    except Exception as e:
+        return f"[ERROR reading {filename}: {str(e)}]"
 
 # Create Tickets
 @app.post("/ticket")
