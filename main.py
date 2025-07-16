@@ -480,6 +480,10 @@ async def generate_csv(request: Request):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Failed to generate CSV: {str(e)}"})
 
+# Login redirect to auth
+@app.get("/login")
+def legacy_login_redirect():
+    return RedirectResponse(url="/oauth/login")
 
 # App Health
 @app.get("/health")
